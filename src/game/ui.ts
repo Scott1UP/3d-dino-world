@@ -2,6 +2,7 @@
 import { ALL_SPECIES, PLAYABLE, SPECIES, SpeciesId } from '../dino/species';
 import { isTouch } from './input';
 import type { Portraits } from './portraits';
+import type { Quality } from './settings';
 
 export type ActionKind = 'roar' | 'eat' | 'hello' | 'egg' | 'fly' | 'charge' | 'gem';
 
@@ -17,6 +18,9 @@ export interface UiHandlers {
   changeDino(): void;
   toggleSound(): boolean;
   toggleMusic(): boolean;
+  /** graphics setting to show as chosen when the game starts */
+  quality: Quality;
+  setQuality(q: Quality): void;
   openBook(): void;
   closeOverlay(): void;
   speakCard(): void;
@@ -53,6 +57,23 @@ export class Ui {
       const on = h.toggleMusic();
       $('music').innerHTML = `<span class="emoji">${on ? '🎵' : '🔕'}</span> Music ${on ? 'on' : 'off'}`;
     });
+
+    // settings open on top of the pause menu and go back to it
+    click('open-settings', () => this.overlay('settings'));
+    click('settings-back', () => this.overlay('pause'));
+    const levels = [...document.querySelectorAll<HTMLButtonElement>('#graphics button')];
+    const showQuality = (q: Quality) => {
+      for (const b of levels) b.setAttribute('aria-pressed', String(b.dataset.quality === q));
+    };
+    showQuality(h.quality);
+    for (const b of levels) {
+      b.addEventListener('click', () => {
+        h.tap();
+        const q = b.dataset.quality as Quality;
+        showQuality(q);
+        h.setQuality(q);
+      });
+    }
 
     const eggs = $('eggs');
     for (const id of PLAYABLE) {
@@ -109,8 +130,8 @@ export class Ui {
     $('hint').classList.add('fade');
   }
 
-  overlay(name: 'card' | 'book' | 'pause' | 'win' | 'none') {
-    for (const id of ['card', 'book', 'pause', 'win']) $(id).classList.toggle('hidden', id !== name);
+  overlay(name: 'card' | 'book' | 'pause' | 'settings' | 'win' | 'none') {
+    for (const id of ['card', 'book', 'pause', 'settings', 'win']) $(id).classList.toggle('hidden', id !== name);
   }
 
   setAction(kind: ActionKind, icon: string, label: string) {

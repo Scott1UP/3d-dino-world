@@ -107,7 +107,15 @@ export class Input {
     for (const ev of ['contextmenu', 'gesturestart', 'dblclick']) {
       document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
     }
-    document.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+    document.addEventListener(
+      'touchmove',
+      (e) => {
+        // a menu that is taller than the screen still needs to scroll (one finger only, so no pinch zoom)
+        if (e.touches.length === 1 && (e.target as Element).closest?.('.menu')) return;
+        e.preventDefault();
+      },
+      { passive: false },
+    );
   }
 
   private placeBase(x: number, y: number) {

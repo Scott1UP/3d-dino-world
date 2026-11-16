@@ -11,8 +11,26 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Dino World" />
     <meta name="theme-color" content="#63b53a" />
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦕</text></svg>" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <title>Dino World</title>
+    <meta
+      name="description"
+      content="A gentle 3D dinosaur game for small children. Pick an egg, hatch a dinosaur and explore an island: eat, grow, make friends and bounce on mushrooms."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Dino World" />
+    <meta property="og:title" content="Dino World" />
+    <meta
+      property="og:description"
+      content="Pick an egg, hatch a dinosaur and explore an island. A gentle 3D game for small children, right in the browser."
+    />
+    <meta property="og:image" content="/og.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="The Dino World logo over a sunny island with a volcano and four spotted dinosaur eggs" />
+    <meta name="twitter:card" content="summary_large_image" />
   </head>
   <body>
     <canvas id="game"></canvas>
@@ -99,6 +117,22 @@
           <button id="change" class="btn btn-alt"><span class="emoji">🥚</span> New egg</button>
           <button id="sound" class="btn btn-plain"><span class="emoji">🔊</span> Sound on</button>
           <button id="music" class="btn btn-plain"><span class="emoji">🎵</span> Music on</button>
+          <button id="open-settings" class="btn btn-plain"><span class="emoji">⚙️</span> Settings</button>
+        </div>
+      </section>
+
+      <section id="settings" class="overlay hidden">
+        <div class="panel menu">
+          <h2 class="heading small">Settings</h2>
+          <div class="setting">
+            <span id="graphics-label" class="setting-label">Graphics</span>
+            <div id="graphics" class="seg" role="group" aria-labelledby="graphics-label">
+              <button data-quality="low" aria-pressed="false">Low</button>
+              <button data-quality="medium" aria-pressed="false">Medium</button>
+              <button data-quality="high" aria-pressed="true">High</button>
+            </div>
+          </div>
+          <button id="settings-back" class="btn btn-go">OK!</button>
         </div>
       </section>
     </div>

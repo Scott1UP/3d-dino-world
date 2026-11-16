@@ -578,6 +578,80 @@ button {
   width: 100%;
   min-width: 290px;
 }
+/* if a menu is still taller than the screen, it scrolls instead of running off the edge */
+.menu {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+}
+.menu > * {
+  flex-shrink: 0;
+}
+/* short landscape screens: pause buttons go two-up so they all fit without scrolling */
+@media (max-height: 620px) and (min-width: 680px) {
+  #pause .menu {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    justify-items: center;
+    gap: 14px 16px;
+  }
+  #pause .menu .heading,
+  #pause .menu #resume {
+    grid-column: 1 / -1;
+  }
+  #pause .menu .btn {
+    min-width: 250px;
+    min-height: 60px;
+    font-size: 26px;
+    padding: 0 20px;
+  }
+}
+
+/* ───────── settings ───────── */
+.setting {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+.setting-label {
+  font-size: 26px;
+  font-weight: 600;
+}
+/* one choice out of a few: a row of joined buttons with the chosen one lit up */
+.seg {
+  display: flex;
+  width: 100%;
+  min-width: 290px;
+  overflow: hidden;
+  background: #fff;
+  border: 5px solid var(--ink);
+  border-radius: 26px;
+  box-shadow: 0 7px 0 rgba(40, 20, 5, 0.9);
+}
+.seg button {
+  flex: 1;
+  min-height: 62px;
+  padding: 0 16px;
+  font-size: 24px;
+  font-weight: 600;
+  background: transparent;
+  transition: background-color 0.15s var(--ease-out), color 0.15s var(--ease-out);
+}
+.seg button + button {
+  border-left: 5px solid var(--ink);
+}
+.seg button:active {
+  background: rgba(59, 36, 20, 0.12);
+}
+.seg button[aria-pressed='true'] {
+  color: #fff;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.22);
+  background: var(--go);
+  box-shadow: inset 0 -7px 0 var(--go-dark), inset 0 4px 0 rgba(255, 255, 255, 0.4);
+}
 
 .card-panel {
   display: grid;
