@@ -9,4 +9,10 @@ All recorded audio is CC0 (public domain) from OpenGameArt. Clips were trimmed, 
 - `step-water-*.m4a` — from "40 CC0 water / splash / slime SFX" by rubberduck
   (https://opengameart.org/content/40-cc0-water-splash-slime-sfx).
 
+- `call-*.m4a` — the other dinosaurs' calls. `call-brachiosaurus` is a second excerpt (the low bellow) of
+  "T-Rex Calls" by CaveboyTup; the rest are from "80 CC0 creature SFX" by rubberduck
+  (https://opengameart.org/content/80-cc0-creature-sfx).
+- `knock-*.m4a` — recorded by Scott (voice memo), cut into five clips and level-matched to the game.
+- `voice/*.mp3` — generated with ElevenLabs from `src/game/voice-lines.json`.
+
 Everything else you hear in the game is synthesised in code.
