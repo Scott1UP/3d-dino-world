@@ -10,6 +10,8 @@ export class Input {
   y = 0;
   onAction: () => void = () => {};
   onPause: () => void = () => {};
+  /** a quick touch on the world itself (not a drag, not a button), in screen coordinates */
+  onTap: (x: number, y: number) => void = () => {};
   /** true while the action button / key is held down */
   held = false;
   /** true once the player has moved at all (used to hide hints) */
@@ -25,12 +27,30 @@ export class Input {
   private knob: HTMLElement;
   private zone: HTMLElement;
   private readonly R = 60;
+  /** touches that may still turn out to be taps, by pointer id */
+  private taps = new Map<number, { x: number; y: number; t: number }>();
 
-  constructor(root: HTMLElement) {
+  constructor(root: HTMLElement, world: HTMLElement) {
     this.zone = root.querySelector<HTMLElement>('#stick-zone')!;
     this.base = root.querySelector<HTMLElement>('#stick-base')!;
     this.knob = root.querySelector<HTMLElement>('#stick-knob')!;
     const action = root.querySelector<HTMLElement>('#action')!;
+
+    // A tap is a short touch that hardly moves. The joystick area covers half the screen, so taps are
+    // picked out there as well as on the bare canvas.
+    const tapStart = (e: PointerEvent) => {
+      if (e.pointerType !== 'mouse') this.taps.set(e.pointerId, { x: e.clientX, y: e.clientY, t: performance.now() });
+    };
+    const tapEnd = (e: PointerEvent) => {
+      const s = this.taps.get(e.pointerId);
+      this.taps.delete(e.pointerId);
+      if (s && performance.now() - s.t < 450 && Math.hypot(e.clientX - s.x, e.clientY - s.y) < 16) this.onTap(e.clientX, e.clientY);
+    };
+    for (const el of [this.zone, world]) {
+      el.addEventListener('pointerdown', tapStart);
+      el.addEventListener('pointerup', tapEnd);
+      el.addEventListener('pointercancel', (e) => this.taps.delete(e.pointerId));
+    }
 
     this.zone.addEventListener('pointerdown', (e) => {
       if (this.stickId !== -1) return;

@@ -406,6 +406,18 @@ export class Sfx {
       this.tone('sine', i % 2 ? 110 : 125, 55, 0.09, 0.4 * fade, i * 0.1);
     }
   }
+  /** Stegosaurus tail spin: one whoosh per turn, bunched up at the start like the spin itself. */
+  spin(turns: number, dur: number) {
+    for (let i = 0; i < turns; i++) {
+      this.noise((dur / turns) * 1.2, 0.34, 350, 1900, dur * (1 - Math.sqrt(1 - i / turns)), 0.8);
+    }
+    this.tone('sine', 95, 50, 0.3, 0.3);
+  }
+  /** Brachiosaurus neck swing: a low grunt as it winds back, then a heavy whoosh for the sweep itself. */
+  swing(delay: number, len: number) {
+    this.tone('sine', 120, 70, delay, 0.3);
+    this.noise(len, 0.42, 200, 1500, delay, 0.7);
+  }
   /**
    * A dinosaur calling out. vol 0..1 by distance; bigger animals sound deeper.
    * Returns how long the call lasts (seconds) so an animation can match it.

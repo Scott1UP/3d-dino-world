@@ -248,9 +248,13 @@ export function dropFood(scene: THREE.Scene, foods: Food[], kind: FoodKind, x: n
   foods.push(f);
 }
 
-export function createFoods(scene: THREE.Scene, colliders: Collider[], rng: () => number): Food[] {
+/**
+ * Scatter food over the island. With a diet, only food that suits it is put out: fruit for a herbivore,
+ * meat and fish for a carnivore. The same rng seed always gives the same spots, whatever the diet.
+ */
+export function createFoods(scene: THREE.Scene, colliders: Collider[], rng: () => number, diet?: 'herbivore' | 'carnivore'): Food[] {
   const kinds: FoodKind[] = ['melon', 'apple', 'banana', 'fish', 'meat', 'berries'];
-  const geos = (geoCache = Object.fromEntries(kinds.map((k) => [k, foodGeo(k)])) as Record<FoodKind, THREE.BufferGeometry>);
+  const geos = (geoCache ??= Object.fromEntries(kinds.map((k) => [k, foodGeo(k)])) as Record<FoodKind, THREE.BufferGeometry>);
   const foods: Food[] = [];
   const place = (kind: FoodKind, x: number, z: number) => {
     const f = new Food(kind, geos[kind], x, z);
@@ -258,11 +262,10 @@ export function createFoods(scene: THREE.Scene, colliders: Collider[], rng: () =
     foods.push(f);
   };
   // a few right by the start so there's always something to eat straight away
-  place('melon', 5, 7);
-  place('apple', -6, 9);
-  place('meat', 1, 14);
-  place('banana', 10, -4);
-  const land = kinds.filter((k) => k !== 'fish');
+  const land: FoodKind[] =
+    diet === 'carnivore' ? ['meat'] : diet === 'herbivore' ? ['melon', 'apple', 'banana', 'berries'] : ['melon', 'apple', 'banana', 'meat', 'berries'];
+  const start: [number, number][] = [[5, 7], [-6, 9], [1, 14], [10, -4]];
+  start.forEach(([x, z], i) => place(land[i % land.length], x, z));
   let n = 0;
   for (let tries = 0; n < 95 && tries < 8000; tries++) {
     const a = rng() * Math.PI * 2, r = 12 + Math.sqrt(rng()) * 162;
@@ -275,7 +278,8 @@ export function createFoods(scene: THREE.Scene, colliders: Collider[], rng: () =
     n++;
   }
   // fish only ever live in the water: lakes, the stream and the shallows of the sea
-  let fish = 0;
+  // (herbivores leave the fish alone, so none are put out for them)
+  let fish = diet === 'herbivore' ? 26 : 0;
   for (let tries = 0; fish < 26 && tries < 20000; tries++) {
     const a = rng() * Math.PI * 2, r = Math.sqrt(rng()) * 190;
     const x = Math.cos(a) * r, z = Math.sin(a) * r;
