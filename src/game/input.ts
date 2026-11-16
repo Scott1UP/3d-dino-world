@@ -10,6 +10,8 @@ export class Input {
   y = 0;
   onAction: () => void = () => {};
   onPause: () => void = () => {};
+  /** true while the action button / key is held down */
+  held = false;
   /** true once the player has moved at all (used to hide hints) */
   moved = false;
 
@@ -70,9 +72,13 @@ export class Input {
     action.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       action.classList.add('down');
+      this.held = true;
       this.onAction();
     });
-    const up = () => action.classList.remove('down');
+    const up = () => {
+      action.classList.remove('down');
+      this.held = false;
+    };
     action.addEventListener('pointerup', up);
     action.addEventListener('pointerleave', up);
     action.addEventListener('pointercancel', up);
@@ -83,12 +89,20 @@ export class Input {
       this.keys.add(k);
       if (k === ' ' || k === 'e' || k === 'enter') {
         e.preventDefault();
+        this.held = true;
         this.onAction();
       }
       if (k === 'escape' || k === 'p') this.onPause();
     });
-    window.addEventListener('keyup', (e) => this.keys.delete(e.key.toLowerCase()));
-    window.addEventListener('blur', () => this.keys.clear());
+    window.addEventListener('keyup', (e) => {
+      const k = e.key.toLowerCase();
+      this.keys.delete(k);
+      if (k === ' ' || k === 'e' || k === 'enter') this.held = false;
+    });
+    window.addEventListener('blur', () => {
+      this.keys.clear();
+      this.held = false;
+    });
     // stop iOS long-press menus, pinch and double-tap zoom
     for (const ev of ['contextmenu', 'gesturestart', 'dblclick']) {
       document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
@@ -128,6 +142,7 @@ export class Input {
   }
 
   reset() {
+    this.held = false;
     this.keys.clear();
     this.jx = this.jy = 0;
   }

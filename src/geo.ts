@@ -72,13 +72,14 @@ function catmull(p0: number, p1: number, p2: number, p3: number, t: number): num
   return 0.5 * (2 * p1 + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (-p0 + 3 * p1 - 3 * p2 + p3) * t3);
 }
 
-export type SkinFn = (u: number, dorsal: number, out: THREE.Color) => void;
+/** u = 0..1 along the tube, dorsal = 1 on the back / -1 on the belly, side = -1..1 left to right */
+export type SkinFn = (u: number, dorsal: number, out: THREE.Color, side: number) => void;
 
 /**
  * Organic tube swept along a spine that lives in the Y/Z plane (symmetrical in X).
  * Rings must run along the curve; `dorsal` passed to the colour fn is 1 on the back, -1 on the belly.
  */
-export function tube(rings: Ring[], color: SkinFn, radial = 12, sub = 5): THREE.BufferGeometry {
+export function tube(rings: Ring[], color: SkinFn, radial = 16, sub = 6): THREE.BufferGeometry {
   const n = (rings.length - 1) * sub + 1;
   const ys: number[] = [];
   const zs: number[] = [];
@@ -111,7 +112,7 @@ export function tube(rings: Ring[], color: SkinFn, radial = 12, sub = 5): THREE.
       const ca = Math.cos(a);
       const sa = Math.sin(a);
       pos.push(sa * rxs[i], ys[i] + tz * ca * rys[i], zs[i] - ty * ca * rys[i]);
-      color(i / (n - 1), ca, _c);
+      color(i / (n - 1), ca, _c, sa);
       col.push(_c.r, _c.g, _c.b);
     }
   }
@@ -128,10 +129,10 @@ export function tube(rings: Ring[], color: SkinFn, radial = 12, sub = 5): THREE.
   // caps
   const s = pos.length / 3;
   pos.push(0, ys[0], zs[0]);
-  color(0, 0, _c);
+  color(0, 0, _c, 0);
   col.push(_c.r, _c.g, _c.b);
   pos.push(0, ys[n - 1], zs[n - 1]);
-  color(1, 0, _c);
+  color(1, 0, _c, 0);
   col.push(_c.r, _c.g, _c.b);
   for (let j = 0; j < radial; j++) {
     const j1 = (j + 1) % radial;
@@ -152,6 +153,8 @@ export interface SkinOpts {
   stripe?: Col;
   /** number of stripes along the tube */
   stripes?: number;
+  /** dappled spots on the back and flanks */
+  spots?: Col;
   /** colour applied where u > tipFrom (beaks, tail tips) */
   tip?: Col;
   tipFrom?: number;
@@ -163,9 +166,18 @@ export function skin(o: SkinOpts): SkinFn {
   const belly = new THREE.Color(o.belly);
   const stripe = o.stripe !== undefined ? new THREE.Color(o.stripe) : null;
   const tip = o.tip !== undefined ? new THREE.Color(o.tip) : null;
+  const spots = o.spots !== undefined ? new THREE.Color(o.spots) : null;
+  const shade = new THREE.Color(o.base).multiplyScalar(0.8);
   const freq = (o.stripes ?? 5) * Math.PI * 2;
-  return (u, d, out) => {
-    out.copy(belly).lerp(base, smoothstep(-0.55, 0.05, d));
+  return (u, d, out, side) => {
+    out.copy(belly).lerp(base, smoothstep(-0.6, -0.05, d));
+    // slightly deeper colour along the spine gives the body some form
+    out.lerp(shade, smoothstep(0.55, 1, d) * 0.45);
+    if (spots) {
+      const a = Math.abs(side);
+      const n = Math.sin(u * 53 + a * 5.1) * Math.sin(a * 8.3 - u * 19 + 1.3);
+      out.lerp(spots, smoothstep(0.42, 0.62, n) * smoothstep(-0.35, 0.1, d) * 0.85);
+    }
     if (stripe) {
       const s = Math.sin(u * freq);
       out.lerp(stripe, smoothstep(0.25, 0.6, s) * smoothstep(-0.05, 0.45, d));

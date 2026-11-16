@@ -28,8 +28,9 @@
       </section>
 
       <section id="select" class="screen hidden">
-        <h2 class="heading">Pick an egg!</h2>
+        <h2 id="pick-title" class="heading">Pick an egg!</h2>
         <div id="eggs"></div>
+        <button id="go" class="btn btn-go btn-huge hidden"><i class="tri"></i>Go!</button>
       </section>
 
       <div id="hud" class="hidden">
@@ -37,6 +38,11 @@
         <button id="btn-book" class="round wide" aria-label="Dino book">
           <span class="emoji">📖</span><span id="book-count">0/5</span>
         </button>
+        <div id="grow" aria-label="Eat to grow">
+          <span class="emoji grow-dino">🦖</span>
+          <span id="grow-pips"></span>
+          <span class="emoji grow-star">⭐</span>
+        </div>
         <div id="hint" class="hidden"></div>
         <div id="stick-zone">
           <div id="stick-base">
@@ -82,6 +88,7 @@
           <button id="resume" class="btn btn-go"><i class="tri"></i>Keep playing</button>
           <button id="change" class="btn btn-alt"><span class="emoji">🥚</span> New egg</button>
           <button id="sound" class="btn btn-plain"><span class="emoji">🔊</span> Sound on</button>
+          <button id="music" class="btn btn-plain"><span class="emoji">🎵</span> Music on</button>
         </div>
       </section>
     </div>

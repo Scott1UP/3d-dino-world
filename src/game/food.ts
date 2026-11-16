@@ -15,7 +15,7 @@ export const FOOD_INFO: Record<FoodKind, { icon: string; word: string; crumbs: n
   berries: { icon: '🍓', word: 'Berries', crumbs: [0xff3355, 0x3aa64a] },
 };
 
-function geoFor(kind: FoodKind): THREE.BufferGeometry {
+export function foodGeo(kind: FoodKind): THREE.BufferGeometry {
   const b = new Bucket();
   switch (kind) {
     case 'melon': {
@@ -101,10 +101,30 @@ function geoFor(kind: FoodKind): THREE.BufferGeometry {
   return b.geometry();
 }
 
-const foodMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+const foodMat = new THREE.MeshLambertMaterial({ vertexColors: true, emissive: 0x2a2410 });
+
+/** Soft round glow that sits behind every piece of food so it stands out from the scenery. */
+export function glowTexture(): THREE.Texture {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d')!;
+  const grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  grad.addColorStop(0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.3, 'rgba(255,244,170,0.65)');
+  grad.addColorStop(0.62, 'rgba(255,220,90,0.22)');
+  grad.addColorStop(1, 'rgba(255,210,60,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 128, 128);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+let glowMat: THREE.SpriteMaterial | null = null;
+const SIZE = 0.95;
 
 export class Food {
   mesh: THREE.Mesh;
+  glow: THREE.Sprite;
   /** 0 = gone, 1 = fully grown */
   grown = 1;
   available = true;
@@ -117,9 +137,14 @@ export class Food {
   constructor(public kind: FoodKind, geo: THREE.BufferGeometry, public x: number, public z: number) {
     this.mesh = new THREE.Mesh(geo, foodMat);
     this.mesh.castShadow = true;
-    this.baseY = Math.max(heightAt(x, z), 0) + 0.25;
+    this.baseY = kind === 'fish' ? 0.15 : Math.max(heightAt(x, z), 0) + 0.25;
     this.mesh.position.set(x, this.baseY, z);
     this.mesh.rotation.y = Math.random() * 6;
+    glowMat ??= new THREE.SpriteMaterial({
+      map: glowTexture(), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.72, toneMapped: false,
+    });
+    this.glow = new THREE.Sprite(glowMat);
+    this.glow.renderOrder = 2;
   }
 
   /** Start flying into a mouth. */
@@ -129,13 +154,24 @@ export class Food {
     this.flyFrom.copy(this.mesh.position);
   }
 
-  update(t: number, dt: number, mouth: THREE.Vector3) {
+  update(t: number, dt: number, mouth: THREE.Vector3, near: boolean) {
+    // far-away food is hidden entirely: fewer draw calls on tablets
+    if (!near && this.fly < 0) {
+      this.mesh.visible = this.glow.visible = false;
+      if (!this.available && (this.regrow -= dt) <= 0) {
+        this.grown = 1;
+        this.available = true;
+      }
+      return;
+    }
+    if (this.available) this.mesh.visible = true;
+    this.glow.visible = this.mesh.visible && this.fly < 0;
     if (this.fly >= 0) {
       this.fly += dt * 2.4;
       const k = Math.min(1, this.fly);
       this.mesh.position.lerpVectors(this.flyFrom, mouth, k * k);
       this.mesh.position.y += Math.sin(k * Math.PI) * 0.5;
-      this.mesh.scale.setScalar(Math.max(0.001, 0.95 * (1 - k * 0.85)));
+      this.mesh.scale.setScalar(Math.max(0.001, SIZE * (1 - k * 0.85)));
       if (k >= 1) {
         this.fly = -1;
         this.mesh.visible = false;
@@ -157,19 +193,23 @@ export class Food {
     }
     const g = this.grown;
     const pop = g < 1 ? g * (1 + Math.sin(g * Math.PI) * 0.4) : 1;
-    this.mesh.scale.setScalar(Math.max(0.001, 0.95 * pop));
-    this.mesh.position.y = this.baseY + 0.12 + Math.sin(t * 2.2 + this.phase) * 0.12;
+    this.mesh.scale.setScalar(Math.max(0.001, SIZE * pop));
+    const bob = this.kind === 'fish' ? Math.abs(Math.sin(t * 1.6 + this.phase)) * 0.7 : Math.sin(t * 2.2 + this.phase) * 0.12;
+    this.mesh.position.set(this.x, this.baseY + 0.12 + bob, this.z);
     this.mesh.rotation.y += dt * 0.7;
+    const pulse = 1 + Math.sin(t * 3 + this.phase) * 0.12;
+    this.glow.position.set(this.x, this.mesh.position.y + 0.55, this.z);
+    this.glow.scale.setScalar(3.3 * pulse * pop);
   }
 }
 
 export function createFoods(scene: THREE.Scene, colliders: Collider[], rng: () => number): Food[] {
   const kinds: FoodKind[] = ['melon', 'apple', 'banana', 'fish', 'meat', 'berries'];
-  const geos = Object.fromEntries(kinds.map((k) => [k, geoFor(k)])) as Record<FoodKind, THREE.BufferGeometry>;
+  const geos = Object.fromEntries(kinds.map((k) => [k, foodGeo(k)])) as Record<FoodKind, THREE.BufferGeometry>;
   const foods: Food[] = [];
   const place = (kind: FoodKind, x: number, z: number) => {
     const f = new Food(kind, geos[kind], x, z);
-    scene.add(f.mesh);
+    scene.add(f.mesh, f.glow);
     foods.push(f);
   };
   // a few right by the start so there's always something to eat straight away
@@ -177,17 +217,28 @@ export function createFoods(scene: THREE.Scene, colliders: Collider[], rng: () =
   place('apple', -6, 9);
   place('meat', 1, 14);
   place('banana', 10, -4);
+  const land = kinds.filter((k) => k !== 'fish');
   let n = 0;
-  for (let tries = 0; n < 62 && tries < 4000; tries++) {
-    const a = rng() * Math.PI * 2, r = 12 + Math.sqrt(rng()) * 100;
+  for (let tries = 0; n < 95 && tries < 8000; tries++) {
+    const a = rng() * Math.PI * 2, r = 12 + Math.sqrt(rng()) * 162;
     const x = Math.cos(a) * r, z = Math.sin(a) * r;
     const h = heightAt(x, z);
-    const kind = kinds[n % kinds.length];
-    if (kind === 'fish' ? h < -0.5 || h > 0.9 : h < 1.1 || h > 6.5) continue;
+    if (h < 1.1 || h > 6.5) continue;
     if (colliders.some((c) => Math.hypot(x - c.x, z - c.z) < c.r + 1.6)) continue;
-    if (foods.some((f) => Math.hypot(x - f.x, z - f.z) < 7)) continue;
-    place(kind, x, z);
+    if (foods.some((f) => Math.hypot(x - f.x, z - f.z) < 8)) continue;
+    place(land[n % land.length], x, z);
     n++;
+  }
+  // fish only ever live in the water: lakes, the stream and the shallows of the sea
+  let fish = 0;
+  for (let tries = 0; fish < 26 && tries < 20000; tries++) {
+    const a = rng() * Math.PI * 2, r = Math.sqrt(rng()) * 190;
+    const x = Math.cos(a) * r, z = Math.sin(a) * r;
+    const h = heightAt(x, z);
+    if (h > -0.3 || h < -1.5) continue;
+    if (foods.some((f) => Math.hypot(x - f.x, z - f.z) < 6)) continue;
+    place('fish', x, z);
+    fish++;
   }
   return foods;
 }

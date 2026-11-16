@@ -3,17 +3,20 @@ import { ALL_SPECIES, PLAYABLE, SPECIES, SpeciesId } from '../dino/species';
 import { isTouch } from './input';
 import type { Portraits } from './portraits';
 
-export type ActionKind = 'roar' | 'eat' | 'hello' | 'egg';
+export type ActionKind = 'roar' | 'eat' | 'hello' | 'egg' | 'fly' | 'charge';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
 export interface UiHandlers {
   play(): void;
   pick(id: SpeciesId): void;
+  /** an egg was tapped once (selected, not yet chosen) */
+  preview(id: SpeciesId): void;
   pause(): void;
   resume(): void;
   changeDino(): void;
   toggleSound(): boolean;
+  toggleMusic(): boolean;
   openBook(): void;
   closeOverlay(): void;
   speakCard(): void;
@@ -23,6 +26,7 @@ export interface UiHandlers {
 export class Ui {
   private toastTimer = 0;
   private actionKey = '';
+  private selected: SpeciesId | null = null;
 
   constructor(private portraits: Portraits, h: UiHandlers) {
     document.body.classList.toggle('touch', isTouch);
@@ -44,6 +48,11 @@ export class Ui {
       $('sound').innerHTML = `<span class="emoji">${on ? '🔊' : '🔇'}</span> Sound ${on ? 'on' : 'off'}`;
     });
 
+    click('music', () => {
+      const on = h.toggleMusic();
+      $('music').innerHTML = `<span class="emoji">${on ? '🎵' : '🔕'}</span> Music ${on ? 'on' : 'off'}`;
+    });
+
     const eggs = $('eggs');
     for (const id of PLAYABLE) {
       const s = SPECIES[id];
@@ -54,19 +63,37 @@ export class Ui {
         `<img class="egg-img" src="${portraits.egg[id]}" alt="" draggable="false" />` +
         `<span class="dino-chip"><img src="${portraits.dino[id]}" alt="" draggable="false" /></span>` +
         `<span class="egg-name">${s.name}</span>`;
+      b.dataset.id = id;
+      // first tap selects the egg and says its name; a second tap (or the Go button) hatches it
       b.addEventListener('click', () => {
         h.tap();
-        h.pick(id);
+        if (this.selected === id) return h.pick(id);
+        this.select(id);
+        h.preview(id);
       });
       eggs.appendChild(b);
     }
+    click('go', () => {
+      if (this.selected) h.pick(this.selected);
+    });
 
     if (!isTouch) {
       $('hint').innerHTML = '<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> walk &nbsp;·&nbsp; <kbd>Space</kbd> eat &amp; say hi';
     }
   }
 
+  private select(id: SpeciesId | null) {
+    this.selected = id;
+    for (const el of document.querySelectorAll<HTMLElement>('.egg-card')) {
+      el.classList.toggle('selected', el.dataset.id === id);
+      el.classList.toggle('dim', id !== null && el.dataset.id !== id);
+    }
+    $('go').classList.toggle('hidden', id === null);
+    $('pick-title').textContent = id ? `${SPECIES[id].name}!` : 'Pick an egg!';
+  }
+
   screen(name: 'loading' | 'title' | 'select' | 'none') {
+    if (name === 'select') this.select(null);
     for (const id of ['loading', 'title', 'select']) $(id).classList.toggle('hidden', id !== name);
   }
 
@@ -90,15 +117,30 @@ export class Ui {
     if (key === this.actionKey) return;
     this.actionKey = key;
     const a = $('action');
-    a.classList.remove('eat', 'hello', 'egg', 'roar', 'ready');
+    a.classList.remove('eat', 'hello', 'egg', 'roar', 'fly', 'charge', 'ready');
     a.classList.add(kind);
-    if (kind !== 'roar') a.classList.add('ready');
+    if (kind === 'eat' || kind === 'hello' || kind === 'egg') a.classList.add('ready');
     const i = $('action-icon');
     i.textContent = icon;
     i.classList.remove('swap');
     void i.offsetWidth;
     i.classList.add('swap');
     $('action-label').textContent = label;
+  }
+
+  /** Growing-up meter: one pip per food still needed for the next size. */
+  grow(stage: number, eaten: number, need: number) {
+    const g = $('grow');
+    g.classList.toggle('done', need === 0);
+    g.dataset.stage = String(stage);
+    const pips = $('grow-pips');
+    pips.innerHTML = '';
+    for (let i = 0; i < need; i++) {
+      const s = document.createElement('i');
+      if (i < eaten) s.className = 'full';
+      if (i === eaten - 1) s.classList.add('new');
+      pips.appendChild(s);
+    }
   }
 
   toast(text: string, ms = 2200) {

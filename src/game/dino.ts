@@ -28,14 +28,31 @@ export class Dino {
     return this.rig.root;
   }
 
+  private shadowOn = true;
+  /** Only nearby dinos need to render into the shadow map. */
+  setShadow(on: boolean) {
+    if (on === this.shadowOn) return;
+    this.shadowOn = on;
+    this.rig.root.traverse((o) => {
+      if ((o as THREE.Mesh).isMesh && o.parent !== this.rig.lids) o.castShadow = on;
+    });
+  }
+
   groundY(): number {
+    if (this.species.swims) return -0.3 * this.scale;
     return Math.max(heightAt(this.x, this.z), -0.5 * this.scale);
   }
 
+  setScale(s: number) {
+    this.scale = s;
+    this.radius = this.species.radius * s;
+    this.rig.root.scale.setScalar(s);
+  }
+
   sync(dt: number) {
-    this.rig.root.position.set(this.x, this.y + this.lift, this.z);
-    this.rig.root.rotation.y = this.heading;
     this.anim.update(dt);
+    this.rig.root.position.set(this.x, this.y + this.lift + this.anim.hopY * this.scale, this.z);
+    this.rig.root.rotation.y = this.heading;
   }
 
   turnToward(angle: number, rate: number, dt: number) {
@@ -82,7 +99,12 @@ export class Npc extends Dino {
       // check a few points along the way so nobody walks through trees or into the lake
       for (let k = 1; k <= 6 && ok; k++) {
         const px = this.x + ((x - this.x) * k) / 6, pz = this.z + ((z - this.z) * k) / 6;
-        if (!canWalk(px, pz) || heightAt(px, pz) < 0.5) ok = false;
+        const h = heightAt(px, pz);
+        if (this.species.swims) {
+          if (h > -0.75 || h < -3.5) ok = false;
+          continue;
+        }
+        if (!canWalk(px, pz) || h < 0.5) ok = false;
         else for (const c of colliders) if (Math.hypot(px - c.x, pz - c.z) < c.r + this.radius) { ok = false; break; }
       }
       if (ok) {

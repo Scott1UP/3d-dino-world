@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { blob, Bucket, Col, cylBetween, flatPoly, plain, sphere, tf, tube } from '../geo';
 import { mulberry32 } from '../util';
-import { heightAt, VOLCANO } from './terrain';
+import { caveAt, heightAt, VOLCANO } from './terrain';
 
 export interface Collider {
   x: number;
@@ -23,7 +23,14 @@ export interface Props {
   update(t: number, dt: number): void;
 }
 
-export const BONES = { x: 34, z: -30 };
+/** x, z, rotation, size */
+export const BONE_SITES: [number, number, number, number][] = [
+  [34, -30, 0, 1],
+  [-92, 58, 1.9, 0.75],
+  [78, 104, -0.8, 0.85],
+  [-48, -112, 2.7, 0.65],
+  [132, -6, 0.9, 0.7],
+];
 const flatMat = new THREE.MeshLambertMaterial({ vertexColors: true });
 
 function palmGeo(): THREE.BufferGeometry {
@@ -37,7 +44,7 @@ function palmGeo(): THREE.BufferGeometry {
         { y: 3.3, z: 0.42, rx: 0.19, ry: 0.19 },
         { y: 4.7, z: 0.98, rx: 0.16, ry: 0.16 },
       ],
-      (u, _d, out) => void out.copy(Math.sin(u * 44) > 0 ? c1 : c2), 7, 6,
+      (u, _d, out) => void out.copy(Math.sin(u * 44) > 0 ? c1 : c2), 7, 4,
     ),
     null,
   );
@@ -46,8 +53,8 @@ function palmGeo(): THREE.BufferGeometry {
     const a = (i / 8) * Math.PI * 2 + 0.2;
     const base = top.clone().multiply(tf(0, 0, 0, 0, a, 0));
     const green = i % 2 ? 0x3fae49 : 0x2f9440;
-    b.add(sphere(1, 6, 4), green, base.clone().multiply(tf(0, 0.22, 0.85, -0.28, 0, 0, 0.36, 0.07, 0.95)), true);
-    b.add(sphere(1, 6, 4), green, base.clone().multiply(tf(0, -0.02, 2.2, 0.6, 0, 0, 0.27, 0.06, 0.8)), true);
+    b.add(sphere(1, 5, 3), green, base.clone().multiply(tf(0, 0.22, 0.85, -0.28, 0, 0, 0.36, 0.07, 0.95)), true);
+    b.add(sphere(1, 5, 3), green, base.clone().multiply(tf(0, -0.02, 2.2, 0.6, 0, 0, 0.27, 0.06, 0.8)), true);
   }
   for (const [x, z] of [[0.2, 0.75], [-0.2, 0.85], [0.02, 1.22]]) b.add(sphere(0.19, 6, 5), 0x6b4a2b, tf(x, 4.42, z));
   return b.geometry();
@@ -91,11 +98,11 @@ function rockGeo(seed: number): THREE.BufferGeometry {
 
 function flowerGeo(petal: Col): THREE.BufferGeometry {
   const b = new Bucket();
-  for (const [x, z, h] of [[0, 0, 0.55], [0.22, 0.1, 0.4], [-0.15, 0.2, 0.45]]) {
+  for (const [x, z, h] of [[0, 0, 0.55], [0.22, 0.12, 0.4]]) {
     b.add(cylBetween([x, 0, z], [x, h, z], 0.025, 0.02, 4), 0x4da33f);
-    for (let i = 0; i < 5; i++) {
-      const a = (i / 5) * Math.PI * 2;
-      b.add(new THREE.OctahedronGeometry(0.08), petal, tf(x + Math.cos(a) * 0.09, h, z + Math.sin(a) * 0.09, 0, 0, 0, 1, 0.5, 1));
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2;
+      b.add(new THREE.OctahedronGeometry(0.09), petal, tf(x + Math.cos(a) * 0.09, h, z + Math.sin(a) * 0.09, 0, 0, 0, 1, 0.5, 1));
     }
     b.add(new THREE.OctahedronGeometry(0.06), 0xffd23f, tf(x, h + 0.02, z));
   }
@@ -134,7 +141,7 @@ function mushroomGeo(): THREE.BufferGeometry {
   return b.geometry();
 }
 
-function bonesGeo(colliders: Collider[], ox: number, oz: number): THREE.BufferGeometry {
+function bonesGeo(): THREE.BufferGeometry {
   const b = new Bucket();
   const BONE = 0xf6f0de;
   const rib = tube(
@@ -152,12 +159,6 @@ function bonesGeo(colliders: Collider[], ox: number, oz: number): THREE.BufferGe
     const s = 1 - Math.abs(i - 2.2) * 0.09;
     for (const side of [0, Math.PI]) {
       b.add(rib, null, tf(0, 0, 0, 0, rot, 0).multiply(tf(i * 2.3 - 5.5, 0, 0, 0, side, 0, s, s, s)), true);
-      const lx = i * 2.3 - 5.5, lz = (side ? -3.3 : 3.3) * s;
-      colliders.push({
-        x: ox + lx * Math.cos(rot) + lz * Math.sin(rot),
-        z: oz - lx * Math.sin(rot) + lz * Math.cos(rot),
-        r: 0.7,
-      });
     }
     b.add(blob(0.5, 0, 0.1, i), BONE, tf(0, 0, 0, 0, rot, 0).multiply(tf(i * 2.3 - 5.5, 5.75 * s, 0, 0, 0, 0, 1.2, 0.8, 1)), true);
   }
@@ -178,6 +179,9 @@ export function createProps(scene: THREE.Scene, avoid: Collider[]): Props {
   const tint = new THREE.Color();
 
   const clear = (x: number, z: number, pad: number) => {
+    // nothing grows inside the caves
+    const cv = caveAt(x, z);
+    if (cv && cv.mask > 0.02 && cv.along > 143) return false;
     for (const a of avoid) if (Math.hypot(x - a.x, z - a.z) < a.r + pad) return false;
     return true;
   };
@@ -223,45 +227,65 @@ export function createProps(scene: THREE.Scene, avoid: Collider[]): Props {
   }
 
   // fossil skeleton landmark
-  const by = heightAt(BONES.x, BONES.z);
-  const bones = new THREE.Mesh(bonesGeo(colliders, BONES.x, BONES.z), flatMat);
-  bones.position.set(BONES.x, by, BONES.z);
-  bones.castShadow = true;
-  scene.add(bones);
+  // fossil skeletons: the big landmark near the start, plus a few more around the island
+  const skeleton = bonesGeo();
+  for (const [bx, bz, yaw, size] of BONE_SITES) {
+    if (heightAt(bx, bz) < 1) continue;
+    const bones = new THREE.Mesh(skeleton, flatMat);
+    bones.position.set(bx, heightAt(bx, bz) - 0.1, bz);
+    bones.rotation.y = yaw;
+    bones.scale.setScalar(size);
+    bones.castShadow = true;
+    scene.add(bones);
+    // each rib foot is something to walk around
+    const rot = 0.5 + yaw;
+    for (let i = 0; i < 6; i++) {
+      const s = 1 - Math.abs(i - 2.2) * 0.09;
+      for (const side of [-1, 1]) {
+        const lx = (i * 2.3 - 5.5) * size, lz = side * 3.3 * s * size;
+        colliders.push({ x: bx + lx * Math.cos(rot) + lz * Math.sin(rot), z: bz - lx * Math.sin(rot) + lz * Math.cos(rot), r: 0.7 * size });
+      }
+    }
+  }
 
-  const meadow = (_x: number, _z: number, h: number, r: number) => r < 122 && h > 1.0 && h < 7;
-  scatter(palmGeo(), 44, {
-    radius: 125, scale: [0.9, 1.5], collide: 0.45, shadow: true, pad: 3,
+  const meadow = (_x: number, _z: number, h: number, r: number) => r < 176 && h > 1.0 && h < 7;
+  scatter(palmGeo(), 78, {
+    radius: 182, scale: [0.9, 1.5], collide: 0.45, shadow: true, pad: 3,
     accept: (_x, _z, h) => h > 0.6 && h < 3.4 && (h < 1.7 || rng() < 0.2),
   });
-  scatter(treeGeo(), 46, {
-    radius: 125, scale: [0.9, 1.7], collide: 0.5, shadow: true, pad: 4,
+  scatter(treeGeo(), 86, {
+    radius: 182, scale: [0.9, 1.7], collide: 0.5, shadow: true, pad: 4,
     accept: (_x, _z, h, r) => h > 1.6 && h < 9 && (r > 45 || rng() < 0.3),
   });
   for (let i = 0; i < 3; i++) {
-    scatter(rockGeo(i * 7 + 1), 30, {
-      radius: 165, scale: [3.5, 8], sink: 0.5, collide: 0.9, shadow: true, tint: 0.2, pad: 6,
+    scatter(rockGeo(i * 7 + 1), 46, {
+      radius: 245, scale: [3.5, 8], sink: 0.5, collide: 0.9, shadow: true, tint: 0.2, pad: 6,
       // only on gentler ground, so boulders sit in the hillside instead of hanging off it
       accept: (x, z, h, r) =>
-        h > 4 && r > 95 && Math.hypot(x - VOLCANO.x, z - VOLCANO.z) > 78 &&
+        h > 4 && r > 140 && Math.hypot(x - VOLCANO.x, z - VOLCANO.z) > 92 &&
         Math.abs(heightAt(x + 5, z) - heightAt(x - 5, z)) + Math.abs(heightAt(x, z + 5) - heightAt(x, z - 5)) < 5,
     });
-    scatter(rockGeo(i * 7 + 2), 14, {
-      radius: 115, scale: [0.9, 2.4], sink: 0.1, collide: 0.9, shadow: true, tint: 0.2, pad: 3, accept: meadow,
+    scatter(rockGeo(i * 7 + 2), 26, {
+      radius: 170, scale: [0.9, 2.4], sink: 0.1, collide: 0.9, shadow: true, tint: 0.2, pad: 3, accept: meadow,
     });
-    scatter(rockGeo(i * 7 + 3), 30, { radius: 120, scale: [0.25, 0.6], sink: 0.05, tint: 0.2, accept: (_x, _z, h) => h > 0.2 && h < 7 });
+    scatter(rockGeo(i * 7 + 3), 55, { radius: 175, scale: [0.25, 0.6], sink: 0.05, tint: 0.2, accept: (_x, _z, h) => h > 0.2 && h < 7 });
   }
-  scatter(bushGeo(), 60, { radius: 122, scale: [0.8, 1.6], shadow: true, accept: meadow, pad: 2 });
-  scatter(fernGeo(), 130, { radius: 122, scale: [0.9, 1.8], accept: (_x, _z, h, r) => r < 125 && h > 0.5 && h < 8 });
+  scatter(bushGeo(), 110, { radius: 176, scale: [0.8, 1.6], accept: meadow, pad: 2 });
+  scatter(fernGeo(), 230, { radius: 178, scale: [0.9, 1.8], accept: (_x, _z, h, r) => r < 180 && h > 0.5 && h < 8 });
   for (const c of [0xffffff, 0xff8fc0, 0xffd84a, 0xb69cff]) {
-    scatter(flowerGeo(c), 110, { radius: 115, scale: [1.2, 2.0], accept: meadow, tint: 0.05, pad: 0 });
+    scatter(flowerGeo(c), 190, { radius: 170, scale: [1.2, 2.0], accept: meadow, tint: 0.05, pad: 0 });
   }
-  scatter(grassGeo(), 3200, { radius: 118, scale: [0.8, 1.7], accept: (_x, _z, h) => h > 1.2 && h < 7, tint: 0.25, pad: -2 });
+  scatter(grassGeo(), 5600, { radius: 172, scale: [0.8, 1.7], accept: (_x, _z, h) => h > 1.2 && h < 7, tint: 0.25, pad: -2 });
 
   // bouncy mushrooms
   const mushrooms: Mushroom[] = [];
   const mGeo = mushroomGeo();
-  for (const [x, z] of [[14, 12], [-16, -22], [48, 14], [-6, -48], [-62, -20], [26, 44], [62, -34]]) {
+  const shroomSpots = [
+    [14, 12], [-16, -22], [48, 14], [-6, -48], [-62, -20], [26, 44], [62, -34],
+    [-110, 20], [118, 30], [-70, 95], [70, 100], [-30, -118], [60, -112], [128, -20], [-125, -30],
+  ];
+  for (const [x, z] of shroomSpots) {
+    if (heightAt(x, z) < 0.9 || !clear(x, z, 1)) continue;
     const mesh = new THREE.Mesh(mGeo, flatMat);
     mesh.position.set(x, heightAt(x, z) - 0.05, z);
     mesh.scale.setScalar(1.25);
@@ -280,7 +304,7 @@ export function createProps(scene: THREE.Scene, avoid: Collider[]): Props {
       b.add(blob(8 + rng() * 7, 1, 0.1, j + i), 0xffffff, tf((j - n / 2) * 11, rng() * 3, rng() * 6, 0, 0, 0, 1.3, 0.55, 1), true);
     }
     const m = new THREE.Mesh(b.geometry(), cloudMat);
-    const a = rng() * Math.PI * 2, r = 120 + rng() * 380;
+    const a = rng() * Math.PI * 2, r = 120 + rng() * 480;
     m.position.set(Math.cos(a) * r, 85 + rng() * 60, Math.sin(a) * r);
     m.scale.setScalar(1 + rng() * 1.2);
     scene.add(m);
@@ -289,7 +313,7 @@ export function createProps(scene: THREE.Scene, avoid: Collider[]): Props {
 
   // volcano glow + smoke
   const vy = heightAt(VOLCANO.x, VOLCANO.z);
-  const glow = new THREE.Mesh(new THREE.CircleGeometry(9, 12), new THREE.MeshBasicMaterial({ color: 0xffa02a, fog: false }));
+  const glow = new THREE.Mesh(new THREE.CircleGeometry(11, 12), new THREE.MeshBasicMaterial({ color: 0xffa02a, fog: false }));
   glow.rotation.x = -Math.PI / 2;
   glow.position.set(VOLCANO.x, vy + 1.2, VOLCANO.z);
   scene.add(glow);
@@ -308,13 +332,13 @@ export function createProps(scene: THREE.Scene, avoid: Collider[]): Props {
     update(t, dt) {
       for (const c of clouds) {
         c.position.x += dt * 1.6;
-        if (c.position.x > 520) c.position.x = -520;
+        if (c.position.x > 620) c.position.x = -620;
       }
       for (const p of puffs) {
         p.t = (p.t + dt * 0.07) % 1;
         const k = p.t;
-        p.mesh.position.set(VOLCANO.x + k * 22 + Math.sin(k * 9 + p.mesh.id) * 3, vy + 4 + k * 55, VOLCANO.z + Math.cos(k * 7 + p.mesh.id) * 3);
-        p.mesh.scale.setScalar(4 + k * 13);
+        p.mesh.position.set(VOLCANO.x + k * 26 + Math.sin(k * 9 + p.mesh.id) * 3, vy + 4 + k * 65, VOLCANO.z + Math.cos(k * 7 + p.mesh.id) * 3);
+        p.mesh.scale.setScalar(5 + k * 16);
         p.mat.opacity = Math.min(1, k * 6) * (1 - k) * 0.95;
       }
       for (const m of mushrooms) {
