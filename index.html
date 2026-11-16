@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Dino World" />
+    <meta name="theme-color" content="#63b53a" />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦕</text></svg>" />
+    <title>Dino World</title>
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+    <div id="ui">
+      <section id="loading" class="screen">
+        <div class="loading-egg"></div>
+        <p>Waking up the dinosaurs…</p>
+      </section>
+
+      <section id="title" class="screen hidden">
+        <h1 class="logo"><span class="logo-a">Dino</span><span class="logo-b">World</span></h1>
+        <button id="play" class="btn btn-go btn-huge"><i class="tri"></i>Play</button>
+      </section>
+
+      <section id="select" class="screen hidden">
+        <h2 class="heading">Pick an egg!</h2>
+        <div id="eggs"></div>
+      </section>
+
+      <div id="hud" class="hidden">
+        <button id="btn-pause" class="round" aria-label="Pause"><i class="bars"></i></button>
+        <button id="btn-book" class="round wide" aria-label="Dino book">
+          <span class="emoji">📖</span><span id="book-count">0/5</span>
+        </button>
+        <div id="hint" class="hidden"></div>
+        <div id="stick-zone">
+          <div id="stick-base">
+            <i class="arrow up"></i><i class="arrow down"></i><i class="arrow left"></i><i class="arrow right"></i>
+            <div id="stick-knob"></div>
+          </div>
+        </div>
+        <button id="action" aria-label="Action">
+          <span id="action-icon" class="emoji">🦖</span>
+          <span id="action-label">Roar</span>
+        </button>
+      </div>
+
+      <div id="toast" class="hidden"></div>
+
+      <section id="card" class="overlay hidden">
+        <div class="panel card-panel">
+          <div class="card-pic"><img id="card-img" alt="" /></div>
+          <div class="card-text">
+            <h2 id="card-name"></h2>
+            <p id="card-say"></p>
+            <p class="fact"><span class="emoji">⭐</span><span id="card-fact"></span></p>
+            <p class="fact"><span id="card-food-icon" class="emoji"></span><span id="card-food"></span></p>
+          </div>
+          <div class="card-actions">
+            <button id="card-speak" class="round" aria-label="Read it to me"><span class="emoji">🔊</span></button>
+            <button id="card-close" class="btn btn-go"><span class="emoji">👋</span> Bye bye!</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="book" class="overlay hidden">
+        <div class="panel">
+          <h2 class="heading small">My Dino Friends</h2>
+          <div id="book-grid"></div>
+          <button id="book-close" class="btn btn-go">OK!</button>
+        </div>
+      </section>
+
+      <section id="pause" class="overlay hidden">
+        <div class="panel menu">
+          <h2 class="heading small">Paused</h2>
+          <button id="resume" class="btn btn-go"><i class="tri"></i>Keep playing</button>
+          <button id="change" class="btn btn-alt"><span class="emoji">🥚</span> New egg</button>
+          <button id="sound" class="btn btn-plain"><span class="emoji">🔊</span> Sound on</button>
+        </div>
+      </section>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
