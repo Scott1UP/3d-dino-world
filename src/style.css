@@ -233,11 +233,13 @@ button {
   gap: clamp(12px, 3vw, 34px);
   justify-content: center;
   align-items: stretch;
+  flex-wrap: wrap;
   max-width: 100%;
 }
 .egg-card {
   position: relative;
-  width: clamp(104px, 27vw, 250px);
+  container-type: inline-size;
+  width: clamp(100px, 16vw, 220px);
   padding: clamp(8px, 2vmin, 18px) 8px clamp(10px, 2vmin, 18px);
   display: flex;
   flex-direction: column;
@@ -252,6 +254,12 @@ button {
 }
 .egg-card:nth-child(2) { animation-delay: 0.08s; }
 .egg-card:nth-child(3) { animation-delay: 0.16s; }
+.egg-card:nth-child(4) { animation-delay: 0.24s; }
+.egg-card:nth-child(5) { animation-delay: 0.32s; }
+/* upright screens: three eggs on the first row, two on the second */
+@media (max-aspect-ratio: 1/1) {
+  .egg-card { width: clamp(100px, 28vw, 220px); }
+}
 .egg-card:active {
   transform: scale(0.94);
 }
@@ -292,6 +300,8 @@ button {
 }
 .egg-card:nth-child(2) .egg-img { animation-delay: -0.5s; }
 .egg-card:nth-child(3) .egg-img { animation-delay: -1s; }
+.egg-card:nth-child(4) .egg-img { animation-delay: -0.3s; }
+.egg-card:nth-child(5) .egg-img { animation-delay: -0.8s; }
 .egg-card .dino-chip {
   position: absolute;
   top: -16px;
@@ -311,7 +321,8 @@ button {
   transform: scale(1.15);
 }
 .egg-card .egg-name {
-  font-size: clamp(17px, 3.6vmin, 30px);
+  /* sized from the card so the longest name (Brachiosaurus) still fits */
+  font-size: clamp(10px, 13cqw, 30px);
   font-weight: 700;
 }
 
@@ -461,6 +472,8 @@ button {
 #action.egg { --face: var(--pink); --edge: #d43a5c; }
 #action.fly { --face: #b58cff; --edge: #7e52d6; }
 #action.charge { --face: #2fc4b2; --edge: #1c8f8a; }
+#action.spin { --face: #9bcf3f; --edge: #6faa2b; }
+#action.swing { --face: #4f9df5; --edge: #3a78d6; }
 #action.gem { --face: #5fd8ff; --edge: #2a9fd6; }
 #action.ready {
   animation: pulse 0.9s ease-in-out infinite;
@@ -533,6 +546,34 @@ button {
   box-shadow: inset 0 -7px 0 #edc67e, 0 6px 0 rgba(40, 20, 5, 0.85);
   pointer-events: none !important;
   animation: toast-in 0.4s var(--pop) both;
+}
+/* saying hello: the dinosaur's picture, its name and a fact about it */
+#toast.hello {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 30px 13px 10px;
+  text-align: left;
+}
+#toast.hello img {
+  flex-shrink: 0;
+  width: clamp(56px, 11vmin, 84px);
+  aspect-ratio: 1;
+  object-fit: contain;
+  border-radius: 50%;
+  border: 4px solid var(--ink);
+  background: radial-gradient(circle at 50% 35%, #fff 0%, var(--tint, #bfe8ff) 80%);
+}
+#toast.hello b {
+  display: block;
+  line-height: 1;
+}
+#toast.hello span {
+  display: block;
+  margin-top: 5px;
+  font-size: 0.62em;
+  font-weight: 600;
+  line-height: 1.1;
 }
 #toast.out {
   animation: toast-out 0.25s ease-in both;
@@ -653,66 +694,10 @@ button {
   box-shadow: inset 0 -7px 0 var(--go-dark), inset 0 4px 0 rgba(255, 255, 255, 0.4);
 }
 
-.card-panel {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  align-items: center;
-  column-gap: clamp(16px, 4vmin, 34px);
-}
-.card-pic {
-  width: clamp(130px, 34vmin, 270px);
-  aspect-ratio: 1;
-  border-radius: 36px;
-  border: 6px solid var(--ink);
-  background: radial-gradient(circle at 50% 35%, #fff 0%, var(--tint, #bfe8ff) 75%);
-  box-shadow: inset 0 -10px 0 rgba(0, 0, 0, 0.12);
-  overflow: hidden;
-}
-.card-pic img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  animation: bob 1.8s ease-in-out infinite;
-}
 @keyframes bob {
   0%, 100% { transform: translateY(2%) rotate(-2deg); }
   50% { transform: translateY(-3%) rotate(2deg); }
 }
-.card-text {
-  text-align: left;
-  min-width: 0;
-}
-.card-text h2 {
-  margin: 0;
-  font-size: clamp(30px, 7vmin, 56px);
-  font-weight: 700;
-  line-height: 1;
-}
-#card-say {
-  margin: 4px 0 12px;
-  font-size: clamp(16px, 3vmin, 22px);
-  font-weight: 500;
-  opacity: 0.6;
-}
-.fact {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin: 8px 0 0;
-  font-size: clamp(20px, 4.2vmin, 32px);
-  font-weight: 600;
-  line-height: 1.15;
-}
-.fact .emoji {
-  font-size: 1.25em;
-}
-.card-actions {
-  grid-column: 1 / -1;
-  display: flex;
-  justify-content: center;
-  gap: 16px;
-}
-
 #btn-book.complete {
   background: #ffe27a;
   box-shadow: inset 0 -7px 0 #f2b93b, 0 5px 0 rgba(40, 20, 5, 0.85), 0 0 22px 6px rgba(255, 210, 31, 0.8);
@@ -820,5 +805,5 @@ button {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .btn-huge, #action.ready, .egg-card .egg-img, .card-pic img, .loading-egg, #confetti i, .trophy { animation: none; }
+  .btn-huge, #action.ready, .egg-card .egg-img, .loading-egg, #confetti i, .trophy { animation: none; }
 }

@@ -13,6 +13,8 @@ export interface Species {
   say: string;
   food: string;
   foodIcon: string;
+  /** decides which food is out on the island when this is the player: fruit, or meat and fish */
+  diet: 'herbivore' | 'carnivore';
   fact: string;
   color: string;
   eggSpots: Col;
@@ -445,6 +447,8 @@ function buildBrachiosaurus(): Rig {
   b.addBody(tube(spine, skin({ base: BASE, belly: BELLY, stripe: STRIPE, stripes: 3, spots: 0x86c1ff }), 18), null);
 
   const neck = b.pivot(b.body, 0, 2.2, 0.82);
+  // a round shoulder joint, so the open end of the neck never shows when it swings down and round
+  b.addBody(sphere(0.47, 14, 10), BASE, tf(0, 2.2, 0.82));
   b.add(
     neck,
     tube(
@@ -618,50 +622,50 @@ function buildTurtle(): Rig {
 const land = { flies: false, swims: false };
 export const SPECIES: Record<SpeciesId, Species> = {
   triceratops: {
-    ...land, id: 'triceratops', name: 'Triceratops', say: 'try-SAIR-uh-tops',
+    ...land, id: 'triceratops', diet: 'herbivore', name: 'Triceratops', say: 'try-SAIR-uh-tops',
     food: 'Herbivore: I only eat plants', foodIcon: '🌿', fact: 'I have three horns!',
     color: '#2fb7a6', eggSpots: 0x2fb7a6, speed: 7.5, radius: 1.2, height: 1.9, voice: 1.1,
     build: buildTriceratops,
   },
   trex: {
-    ...land, id: 'trex', name: 'T-Rex', say: 'TEE-rex',
+    ...land, id: 'trex', diet: 'carnivore', name: 'T-Rex', say: 'TEE-rex',
     food: 'Carnivore: I eat meat', foodIcon: '🍖', fact: 'I have a very big ROAR!',
     color: '#f0623a', eggSpots: 0xf0623a, speed: 8.5, radius: 1.1, height: 2.9, voice: 0.7,
     build: buildTRex,
   },
   pteranodon: {
-    ...land, id: 'pteranodon', name: 'Pterodactyl', say: 'terra-DAK-til',
+    ...land, id: 'pteranodon', diet: 'carnivore', name: 'Pterodactyl', say: 'terra-DAK-til',
     food: 'I eat fish', foodIcon: '🐟', fact: 'I can fly up high!',
     color: '#9a5cf0', eggSpots: 0x9a5cf0, speed: 10, radius: 0.9, height: 2.2, flies: true, voice: 2.2,
     build: buildPteranodon,
   },
   stegosaurus: {
-    ...land, id: 'stegosaurus', name: 'Stegosaurus', say: 'steg-oh-SORE-us',
+    ...land, id: 'stegosaurus', diet: 'herbivore', name: 'Stegosaurus', say: 'steg-oh-SORE-us',
     food: 'Herbivore: I only eat plants', foodIcon: '🌿', fact: 'I have plates on my back!',
     color: '#9bcf3f', eggSpots: 0x9bcf3f, speed: 6, radius: 1.3, height: 2.2, voice: 0.9,
     build: buildStegosaurus,
   },
   brachiosaurus: {
-    ...land, id: 'brachiosaurus', name: 'Brachiosaurus', say: 'BRAK-ee-oh-SORE-us',
+    ...land, id: 'brachiosaurus', diet: 'herbivore', name: 'Brachiosaurus', say: 'BRAK-ee-oh-SORE-us',
     food: 'Herbivore: I eat treetop leaves', foodIcon: '🍃', fact: 'My neck is super long!',
     color: '#4f9df5', eggSpots: 0x4f9df5, speed: 5, radius: 1.5, height: 4.6, voice: 0.5,
     build: buildBrachiosaurus,
   },
   plesiosaurus: {
-    ...land, id: 'plesiosaurus', name: 'Plesiosaurus', say: 'PLEE-see-oh-SORE-us',
+    ...land, id: 'plesiosaurus', diet: 'carnivore', name: 'Plesiosaurus', say: 'PLEE-see-oh-SORE-us',
     food: 'I eat fish', foodIcon: '🐟', fact: 'I love to swim!',
     color: '#ff7fa8', eggSpots: 0xff7fa8, speed: 5, radius: 1.4, height: 2.2, swims: true, voice: 1.4,
     build: buildPlesiosaurus,
   },
   turtle: {
-    ...land, id: 'turtle', name: 'Sea Turtle', say: 'SEE TUR-tul',
+    ...land, id: 'turtle', diet: 'herbivore', name: 'Sea Turtle', say: 'SEE TUR-tul',
     food: 'I eat sea plants', foodIcon: '🌿', fact: 'My shell is my house!',
     color: '#3f9a58', eggSpots: 0x3f9a58, speed: 3.5, radius: 1.0, height: 1.0, swims: true, voice: 1.8,
     build: buildTurtle,
   },
 };
 
-export const PLAYABLE: SpeciesId[] = ['triceratops', 'trex', 'pteranodon'];
+export const PLAYABLE: SpeciesId[] = ['triceratops', 'trex', 'pteranodon', 'stegosaurus', 'brachiosaurus'];
 export const ALL_SPECIES = Object.keys(SPECIES) as SpeciesId[];
 /** Species that can hatch from nest eggs (land babies only). */
 export const HATCHABLE: SpeciesId[] = ['triceratops', 'stegosaurus', 'trex', 'brachiosaurus', 'pteranodon'];

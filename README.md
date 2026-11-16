@@ -14,17 +14,21 @@ npm run build    # typecheck + static site in dist/
 
 ## Controls
 
-- **Touch:** left-thumb joystick to move; one big round button that changes with what's nearby.
+- **Touch:** left-thumb joystick to move; one big round button that changes with what's nearby. You can also tap
+  the ground to walk there, or tap food, a dinosaur, an egg or a crystal to walk over and use it (straight away if
+  it is already in reach). Moving the joystick cancels a tap.
 - **Keyboard:** WASD or arrow keys to move, Space for the button, Esc to pause.
 
 On the egg screen, tap an egg once to select it (its name is read out), then tap it again or press **Go!**.
 
 ## What you can do
 
-- **Grow up.** You hatch small. Eat 3 pieces of food to grow, then 6 more to reach full size. Food glows so it
-  stands out, and grows back after a while. Fish live in the water.
-- **Meet the dinosaurs.** Walk up to one and say hello for a card with its picture, name and a couple of facts,
-  read aloud. There are seven to find (Triceratops, T-Rex, Pterodactyl, Stegosaurus, Brachiosaurus, Plesiosaurus
+- **Grow up.** You hatch small. Eat 3 pieces of food to grow, then 3 more to reach full size. Food glows so it
+  stands out, and grows back after a while. The island only has food your dinosaur eats: fruit for herbivores
+  (Triceratops, Stegosaurus, Brachiosaurus), meat and fish for carnivores (T-Rex, Pterodactyl). Fish live in the water. Once you are full size, each thing you eat is
+  passed on to your smallest baby follower, which grows a little (up to about two thirds of your size).
+- **Meet the dinosaurs.** Walk up to one and say hello: a toast shows its picture, name and a fact while it
+  introduces itself aloud, and the game carries on. There are seven to find (Triceratops, T-Rex, Pterodactyl, Stegosaurus, Brachiosaurus, Plesiosaurus
   and Sea Turtle); the book in the corner keeps track, and finding them all gets a celebration.
 - **Hatch babies.** Eggs sit in nests around the island. Hatch one and the baby follows you.
 - **Bounce.** Red mushrooms are springy; bounce again without touching the ground to go higher.
@@ -34,8 +38,10 @@ Each playable dinosaur has its own thing when nothing else is in reach:
 
 | Dinosaur    | Button  | What it does |
 | ----------- | ------- | ------------ |
-| T-Rex       | Roar!   | Tap for a small roar; hold to wind up a big one. The roar rolls out as a shockwave: trees shake and drop fruit, and other dinosaurs call back. A full-power roar knocks over nearby trees and dinosaurs. |
+| T-Rex       | Roar!   | Tap for a small roar; hold to wind up a big one. The roar rolls out as a shockwave: trees shake, and other dinosaurs call back. A full-power roar knocks over nearby trees and dinosaurs. |
 | Triceratops | Charge! | Puts its head down and dashes. Knocks over any dinosaur or tree in the way; they get back up after a few seconds. |
+| Stegosaurus | Spin!   | Tap for one tail spin; hold to wind up as many as four. The spin sends out the same shockwave as the roar. |
+| Brachiosaurus | Swing! | Lowers its long neck and swings it like a bat, knocking over every tree and dinosaur it sweeps past. Tap for a sweep across the front; hold past half way and it turns right round, hitting everything in a circle. The ring shows how far it reaches (a bit further than the neck itself). |
 | Pterodactyl | Fly!    | Hold to climb, let go to float down. It can land on treetops and on other dinosaurs' backs and heads, and gets carried along when they walk. A ring on the ground shows where it will land. |
 
 ## Voice-over

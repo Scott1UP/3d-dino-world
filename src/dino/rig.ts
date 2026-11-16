@@ -104,6 +104,11 @@ export class Animator {
   hopY = 0;
   /** head-down charging pose */
   charging = false;
+  /** whirling round on the spot: the tail whips out to one side */
+  spinning = false;
+  /** long necks: lowered and swung like a bat, held at the angle sweepYaw (radians, relative to the body) */
+  sweeping = false;
+  sweepYaw = 0;
   /** 0..1: rearing back, drawing breath for a big roar */
   windup = 0;
   /** flyers only: standing on a perch with wings folded */
@@ -117,6 +122,8 @@ export class Animator {
   private eat = 0;
   private roar = 0;
   private charge = 0;
+  private spin = 0;
+  private sweep = 0;
   private perch = 0;
   private blink = 1 + Math.random() * 4;
 
@@ -129,6 +136,8 @@ export class Animator {
     this.eat += ((this.eating ? 1 : 0) - this.eat) * damp(9, dt);
     this.roar += ((this.roaring ? 1 : 0) - this.roar) * damp(10, dt);
     this.charge += ((this.charging ? 1 : 0) - this.charge) * damp(12, dt);
+    this.spin += ((this.spinning ? 1 : 0) - this.spin) * damp(10, dt);
+    this.sweep += ((this.sweeping ? 1 : 0) - this.sweep) * damp(this.sweeping ? 14 : 7, dt);
     this.perch += ((this.perched ? 1 : 0) - this.perch) * damp(7, dt);
     const pk = this.perch;
     const before = this.cycle;
@@ -165,7 +174,7 @@ export class Animator {
     this.hopY = this.hop > 0 ? Math.sin((1 - this.hop) * Math.PI) * 0.6 : 0;
     r.body.position.y = y;
     r.body.rotation.x = this.eat * r.bodyEatPitch - this.roar * 0.12 + this.charge * 0.1 - pk * 0.32 - this.windup * 0.2;
-    r.body.rotation.z = this.flies || r.swims ? Math.sin(t * 1.4) * 0.03 : Math.sin(this.cycle) * 0.035 * w;
+    r.body.rotation.z = this.flies || r.swims ? Math.sin(t * 1.4) * 0.03 : Math.sin(this.cycle) * 0.035 * w + this.spin * 0.1;
     // breathing
     const breath = 1 + Math.sin(t * 2) * 0.012;
     r.body.scale.set(breath, breath, 1);
@@ -174,12 +183,23 @@ export class Animator {
     r.head.rotation.y = Math.sin(t * 0.6) * 0.14 * (1 - w) * (1 - this.eat);
     r.head.rotation.z = this.roar * Math.sin(t * 30) * 0.05 + Math.sin(t * 0.43) * 0.05 * (1 - w);
 
+    // neck swing: bring the neck down level, turn it to the side, and let it stretch a little
+    const sk = this.sweep;
+    r.head.rotation.order = sk > 0.001 ? 'YXZ' : 'XYZ';
+    if (sk > 0.001) {
+      r.head.rotation.x += (1.05 - r.head.rotation.x) * sk;
+      r.head.rotation.y += (this.sweepYaw - r.head.rotation.y) * sk;
+    }
+    // stretch along its length only, so the base stays tucked into the shoulders; the body leans into the swing
+    r.head.scale.set(1, 1 + sk * 0.2, 1);
+    r.body.rotation.z += sk * this.sweepYaw * 0.07;
+
     if (r.jaw) {
       const chomp = this.eat > 0.3 ? Math.abs(Math.sin(t * 13)) * 0.4 : 0;
       r.jaw.rotation.x = chomp + this.roar * 0.6 + 0.02;
     }
     if (r.tail) {
-      r.tail.rotation.y = Math.sin(t * 2.1) * 0.14 + Math.sin(this.cycle) * 0.22 * w;
+      r.tail.rotation.y = Math.sin(t * 2.1) * 0.14 + Math.sin(this.cycle) * 0.22 * w + this.spin * 0.6;
       r.tail.rotation.x = Math.sin(t * 1.3) * 0.04;
     }
     this.flapped = false;

@@ -16,7 +16,7 @@ import { renderPortraits } from './portraits';
 import { loadQuality, Quality, QUALITY, saveQuality } from './settings';
 import { Ui } from './ui';
 
-type State = 'title' | 'select' | 'hatch' | 'play' | 'card' | 'book' | 'pause' | 'win';
+type State = 'title' | 'select' | 'hatch' | 'play' | 'book' | 'pause' | 'win';
 
 interface Nest {
   x: number;
@@ -49,11 +49,25 @@ interface Wave {
   bonks: number;
 }
 
-type Target =
-  | { type: 'food'; food: Food; x: number; z: number; top: number }
-  | { type: 'npc'; npc: Npc; x: number; z: number; top: number }
-  | { type: 'nest'; nest: Nest; x: number; z: number; top: number }
-  | { type: 'gem'; cave: number; x: number; z: number; top: number };
+/** something to interact with: where it stands, and the heights of its base and of the marker above it */
+type Target = { x: number; z: number; y: number; top: number } & (
+  | { type: 'food'; food: Food }
+  | { type: 'npc'; npc: Npc }
+  | { type: 'nest'; nest: Nest }
+  | { type: 'gem'; cave: number }
+);
+
+/** where a tap on the world is sending the player: a spot on the ground, or something to walk up to and use */
+interface Goal {
+  x: number;
+  z: number;
+  target: Target | null;
+  /** how close counts as there */
+  range: number;
+  /** closest we have got so far, and how long since that improved (to give up when stuck) */
+  best: number;
+  stall: number;
+}
 
 const SPAWN = { x: 0, z: 0 };
 const NEST_SPOTS: [number, number][] = [
@@ -62,6 +76,16 @@ const NEST_SPOTS: [number, number][] = [
   [60, 20], [-48, -4],
 ];
 const MAX_BABIES = 4;
+/** babies hatch tiny; each meal passed on to one makes it this much bigger, up to a limit */
+/** brachiosaurus neck swing: how far to each side of straight ahead the neck goes (radians) */
+const SWING_ARC = Math.PI * 0.5;
+/** ...and its timing: wind back, whip across (longer when the body turns right round too), follow through */
+const SWING_BACK = 0.3;
+const SWING_WHIP = [0.3, 0.62];
+const SWING_SETTLE = 0.34;
+const BABY_SCALE = 0.3;
+const BABY_GROW = 0.15;
+const BABY_MAX = 0.9;
 /** bouncy mushroom cap: radius and height of the top above the ground */
 const CAP_R = 1.56;
 const CAP_TOP = 1.8;
@@ -75,7 +99,7 @@ const CRYSTAL_SPEED = 1.5;
 /** Growing up: hatch small, eat to grow. `need` = foods to reach the next size. */
 const STAGES = [
   { scale: 0.5, need: 3 },
-  { scale: 0.95, need: 6 },
+  { scale: 0.95, need: 3 },
   // full size matches the grown-up dinosaurs wandering the island
   { scale: 1.4, need: 0 },
 ];
@@ -110,7 +134,6 @@ export class Game {
   private player: Dino | null = null;
   private target: Target | null = null;
   private met = new Set<SpeciesId>();
-  private cardSpecies: SpeciesId = 'trex';
 
   private camYaw = 0;
   private look = new THREE.Vector3();
@@ -142,15 +165,31 @@ export class Game {
   /** where a flying pterodactyl would touch down: shown as a ring so landings are easy to judge */
   private landRing: THREE.Mesh;
   private landDisc: THREE.Mesh;
-  /** all seven friends met: celebrate once, after the last card is closed */
+  /** all seven friends met: celebrate once, a few seconds after the last hello */
   private won = false;
-  private winPending = false;
+  private winT = 0;
   /** seconds of sparkle trail left after touching the magic crystal */
   private sparkleT = 0;
   /** T-Rex: holding the button winds up a bigger roar */
   private roarHold = false;
   private roarPower = 0;
   private wave: Wave | null = null;
+  /** stegosaurus: seconds of tail spin left, out of how long, and how many times round */
+  private spinT = 0;
+  private spinDur = 1;
+  private spinTurns = 1;
+  /** brachiosaurus neck swing: seconds left, out of how long, how hard, and whether the body turns right round too */
+  private swingT = 0;
+  private swingDur = 1;
+  private swingPower = 0;
+  private swingTurns = 0;
+  /** where the neck was pointing last frame, and what this swing has already hit */
+  private swingAng = 0;
+  private swingTrees = 0;
+  private swingBonks = 0;
+  /** tap-to-go */
+  private goal: Goal | null = null;
+  private goRing: THREE.Mesh;
   private waveRing: THREE.Mesh;
   private powerRing: THREE.Mesh;
   private camShake = 0;
@@ -219,7 +258,9 @@ export class Game {
     // roar: a ring that grows under the T-Rex while winding up, and the shockwave that rolls out
     this.powerRing = new THREE.Mesh(new THREE.RingGeometry(0.8, 1, 40), new THREE.MeshBasicMaterial({ ...flat, color: 0xffd21f, opacity: 0.9 }));
     this.waveRing = new THREE.Mesh(new THREE.RingGeometry(0.9, 1, 64), new THREE.MeshBasicMaterial({ ...flat, color: 0xffffff, opacity: 0.8 }));
-    for (const m of [this.landDisc, this.landRing, this.powerRing, this.waveRing]) {
+    // tap-to-go: marks the spot the player is walking to
+    this.goRing = new THREE.Mesh(new THREE.RingGeometry(0.62, 0.9, 32), new THREE.MeshBasicMaterial({ ...flat, color: 0xffffff, opacity: 0.85 }));
+    for (const m of [this.landDisc, this.landRing, this.powerRing, this.waveRing, this.goRing]) {
       m.rotation.x = -Math.PI / 2;
       m.renderOrder = 5;
       m.visible = false;
@@ -257,11 +298,11 @@ export class Game {
         this.ui.book(this.met);
       },
       closeOverlay: () => this.closeOverlay(),
-      speakCard: () => this.speakCard(),
       tap: () => this.sfx.tap(),
     });
-    this.input = new Input(document.getElementById('ui')!);
+    this.input = new Input(document.getElementById('ui')!, canvas);
     this.input.onAction = () => this.action();
+    this.input.onTap = (x, y) => this.tapAt(x, y);
     this.input.onPause = () => (this.state === 'pause' ? this.closeOverlay() : this.pause());
 
     window.addEventListener('pointerdown', () => this.sfx.unlock(), { capture: true });
@@ -426,21 +467,21 @@ export class Game {
   }
 
   private closeOverlay() {
-    if (this.state !== 'card' && this.state !== 'book' && this.state !== 'pause' && this.state !== 'win') return;
+    if (this.state !== 'book' && this.state !== 'pause' && this.state !== 'win') return;
     this.sfx.hush();
-    if (this.state === 'card' && this.winPending) {
-      // that was the last friend: time to celebrate
-      this.winPending = false;
-      this.state = 'win';
-      this.ui.win();
-      this.sfx.win();
-      this.sfx.say('win');
-      const p = this.player;
-      if (p) this.particles.burst(this.v.set(p.x, p.y + 2, p.z), 60, [0xffd21f, 0xff5e7e, 0x6fd03c, 0x3bb4f6, 0xffffff], { speed: 9, up: 11, size: 0.26, life: 1.4, spread: 2 });
-      return;
-    }
     this.ui.overlay('none');
     this.state = 'play';
+  }
+
+  /** Every friend has been met: time to celebrate. */
+  private win() {
+    this.state = 'win';
+    this.input.reset();
+    this.ui.win();
+    this.sfx.win();
+    this.sfx.say('win');
+    const p = this.player;
+    if (p) this.particles.burst(this.v.set(p.x, p.y + 2, p.z), 60, [0xffd21f, 0xff5e7e, 0x6fd03c, 0x3bb4f6, 0xffffff], { speed: 9, up: 11, size: 0.26, life: 1.4, spread: 2 });
   }
 
   private startHatch(id: SpeciesId) {
@@ -450,9 +491,14 @@ export class Game {
     this.babies = [];
     this.player = null;
     this.target = null;
+    // lay out the island's food afresh to suit what this dinosaur eats
+    for (const f of this.foods) this.scene.remove(f.mesh, f.glow);
+    this.foods = createFoods(this.scene, this.props.colliders, mulberry32(77), SPECIES[id].diet);
+    this.eatFood = null;
     this.ui.screen('none');
-    this.landRing.visible = this.landDisc.visible = this.powerRing.visible = this.waveRing.visible = false;
+    this.landRing.visible = this.landDisc.visible = this.powerRing.visible = this.waveRing.visible = this.goRing.visible = false;
     this.wave = null;
+    this.goal = null;
     this.roarHold = false;
     this.hatchSpecies = id;
     this.hatchT = 0;
@@ -510,6 +556,7 @@ export class Game {
       this.roarT = 0;
       this.flying = false;
       this.chargeT = this.chargeCool = this.bounces = 0;
+      this.spinT = this.swingT = 0;
       this.perchKey = null;
       this.sparkleT = 0;
       this.hover = s.flies ? 0.5 : 0;
@@ -549,31 +596,35 @@ export class Game {
   // ───────────────────────── play ─────────────────────────
 
   private action() {
-    if (this.state === 'card' || this.state === 'book' || this.state === 'win') return this.closeOverlay();
+    if (this.state === 'book' || this.state === 'win') return this.closeOverlay();
     const p = this.player;
     if (this.state !== 'play' || !p || this.eatT > 0) return;
     const t = this.target;
-    if (!t) {
-      if (p.species.flies) {
-        // hold to climb; let go to float back down
-        this.flying = true;
-        this.sfx.flap(0.8);
-        return;
-      }
-      if (p.species.id === 'triceratops') {
-        if (this.chargeCool > 0) return;
-        // a full-grown triceratops charges for half a second longer
-        this.chargeT = this.stage === STAGES.length - 1 ? 1.35 : 0.85;
-        this.chargeCool = 1.5;
-        this.sfx.charge(this.chargeT);
-        return;
-      }
-      if (this.roarT > 0.3 || this.roarHold) return;
-      // start drawing breath: the roar goes off when the button is let go (see updatePlayer)
-      this.roarHold = true;
-      this.roarPower = 0;
+    if (t) return this.interact(t);
+    if (p.species.flies) {
+      // hold to climb; let go to float back down
+      this.flying = true;
+      this.sfx.flap(0.8);
       return;
     }
+    if (p.species.id === 'triceratops') {
+      if (this.chargeCool > 0) return;
+      // a full-grown triceratops charges for half a second longer
+      this.chargeT = this.stage === STAGES.length - 1 ? 1.35 : 0.85;
+      this.chargeCool = 1.5;
+      this.sfx.charge(this.chargeT);
+      return;
+    }
+    // T-Rex roar, stegosaurus tail spin, brachiosaurus neck swing: all wound up by holding the button
+    if (this.roarT > 0.3 || this.roarHold || this.spinT > 0 || this.swingT > 0) return;
+    // start winding up: it goes off when the button is let go (see updatePlayer)
+    this.roarHold = true;
+    this.roarPower = 0;
+  }
+
+  /** Use the thing in reach: eat it, say hello to it, touch it or hatch it. */
+  private interact(t: Target) {
+    const p = this.player!;
     if (t.type === 'food') {
       this.eatT = 1.25;
       this.eatFood = t.food;
@@ -588,12 +639,14 @@ export class Game {
       const isNew = !this.met.has(s.id);
       this.met.add(s.id);
       this.ui.bookCount(this.met);
-      if (!this.won && this.met.size === ALL_SPECIES.length) this.won = this.winPending = true;
-      this.cardSpecies = s.id;
-      this.state = 'card';
-      this.input.reset();
-      this.ui.card(s.id);
-      this.speakCard();
+      // the game carries on: a toast shows who this is while its lines are read out
+      this.ui.hello(s.id);
+      this.sfx.say(`card.${s.id}` as VoiceLine);
+      // the last friend gets a moment to say hello before the celebration
+      if (!this.won && this.met.size === ALL_SPECIES.length) {
+        this.won = true;
+        this.winT = 5;
+      }
       if (isNew) this.particles.burst(this.v.set(t.x, t.top, t.z), 24, [0xffd21f, 0xffffff, 0xff8fc0], { speed: 5, up: 7, size: 0.2 });
     } else if (t.type === 'gem') {
       // the magic crystal sings, the whole cave lights up, and you leave with a sparkle trail
@@ -601,29 +654,169 @@ export class Game {
       this.sfx.chime();
       p.anim.hop = 1;
       this.sparkleT = CRYSTAL_TIME;
-      this.ui.toast('Magic sparkles! ✨', 2600);
+      this.ui.toast('Speed Crystal! ✨', 2600);
       this.particles.burst(this.v.set(t.x, t.top - 1, t.z), 70, [0x5ff2ff, 0xff7fe0, 0xffffff, 0xffd21f, 0xb884ff], { speed: 8, up: 10, size: 0.24, life: 1.5, spread: 2 });
     } else {
       this.hatchNest(t.nest);
     }
   }
 
-  /** Let the roar go. power 0..1 decides how long, how loud and how far it carries. */
+  /**
+   * Let the wound-up move go: a roar, a tail spin or a neck swing, depending on who is playing.
+   * power 0..1 decides how big it is and how far its shockwave carries.
+   */
   private releaseRoar() {
     const p = this.player!;
     const power = Math.max(0.2, Math.min(1, this.roarPower));
     this.roarHold = false;
     this.powerRing.visible = false;
-    // clear away fallen fruit that has already been eaten
-    for (const f of this.foods) if (f.dead) this.scene.remove(f.mesh, f.glow);
-    this.foods = this.foods.filter((f) => !f.dead);
+    if (p.species.id === 'brachiosaurus') {
+      // a quick one sweeps across the front; wound up past half way, the whole animal turns right round too
+      this.swingPower = power;
+      this.swingTurns = power >= 0.5 ? 1 : 0;
+      this.swingT = this.swingDur = SWING_BACK + SWING_WHIP[this.swingTurns] + SWING_SETTLE;
+      this.swingTrees = this.swingBonks = 0;
+      this.clearEaten();
+      this.sfx.swing(SWING_BACK, SWING_WHIP[this.swingTurns] + 0.12);
+      return;
+    }
+    if (p.species.id === 'stegosaurus') {
+      // the longer the wind-up, the more times round: 1 to 4 spins
+      this.spinTurns = 1 + Math.round(power * 3);
+      this.spinT = this.spinDur = 0.35 + this.spinTurns * 0.3;
+      this.sfx.spin(this.spinTurns, this.spinDur);
+      this.shockwave(power);
+      return;
+    }
     // the roar pose lasts exactly as long as the sound
     this.roarT = this.sfx.roar(p.species.voice, p.species.id === 'trex', power);
-    this.wave = { x: p.x, z: p.z, r: 1, max: 10 + 30 * power, power, trees: new Set(), npcs: new Set(), crashes: 0, bonks: 0 };
-    if (power > 0.5) this.camShake = power * 0.55;
+    this.shockwave(power);
     p.mouthWorld(this.v);
     this.particles.burst(this.v, 10 + Math.round(power * 30), [0xffffff, 0xffe27a], { speed: 6 + power * 9, up: 1.5, size: 0.16 + power * 0.1, life: 0.6, gravity: 2 });
+  }
+
+  /** Clear away fallen fruit that has already been eaten. */
+  private clearEaten() {
+    for (const f of this.foods) if (f.dead) this.scene.remove(f.mesh, f.glow);
+    this.foods = this.foods.filter((f) => !f.dead);
+  }
+
+  /** Ripe fruit comes tumbling out of a tree that has been shaken or felled (each tree needs a while to ripen again). */
+  private dropFruit(tr: Props['trees'][number]) {
+    // fruit is no use to a meat-eater
+    if (this.player?.species.diet === 'carnivore') return;
+    if (tr.fruitT > 0 || this.foods.reduce((n, f) => n + (f.once && !f.dead ? 1 : 0), 0) >= 16) return;
+    tr.fruitT = 25;
+    const a = Math.random() * Math.PI * 2, rr = 1.6 + Math.random() * 1.6;
+    const fx = tr.cx + Math.cos(a) * rr, fz = tr.cz + Math.sin(a) * rr;
+    if (heightAt(fx, fz) > 0.3) dropFood(this.scene, this.foods, tr.palm ? 'banana' : 'apple', fx, fz, tr.top - 1);
+  }
+
+  /** Send a shockwave rolling out from the player (see updateWave). */
+  private shockwave(power: number) {
+    const p = this.player!;
+    this.clearEaten();
+    this.wave = { x: p.x, z: p.z, r: 1, max: 10 + 30 * power, power, trees: new Set(), npcs: new Set(), crashes: 0, bonks: 0 };
+    if (power > 0.5) this.camShake = power * 0.55;
     for (const b of this.babies) b.anim.hop = 1;
+  }
+
+  /**
+   * How far a brachiosaurus neck swing reaches from the middle of its body. The lowered neck really gets to
+   * about 4.1 x scale; the swing reaches a good bit further than that, and further still when wound up.
+   */
+  private neckReach(power: number): number {
+    return this.player!.scale * (4.1 + 1.2 * power) * 1.15 + 0.6;
+  }
+
+  /** The neck has just swept from one angle round to another: bowl over every tree and dinosaur it passed. */
+  private sweepHit(from: number, to: number) {
+    const p = this.player!;
+    const reach = this.neckReach(this.swingPower);
+    const width = from - to;
+    // things right up against the body get hit whichever way the neck is pointing
+    const inPath = (dx: number, dz: number, d: number) => {
+      if (d < p.radius + 0.8) return true;
+      const a = wrapAngle(Math.atan2(dx, dz) - to);
+      return a > -0.12 && a < width + 0.12;
+    };
+    for (const tr of this.props.trees) {
+      const dx = tr.x - p.x, dz = tr.z - p.z;
+      if (tr.down > 0 || Math.abs(dx) > reach + 2 || Math.abs(dz) > reach + 2) continue;
+      const d = Math.hypot(dx, dz);
+      if (d > reach + tr.trunkR || !inPath(dx, dz, d)) continue;
+      this.props.knock(tr, dx, dz);
+      this.dropFruit(tr);
+      if (this.swingTrees++ < 3) this.sfx.timber();
+      this.camShake = Math.max(this.camShake, 0.3);
+      this.particles.burst(this.v.set(tr.x, p.y + 3, tr.z), 22, [0x3aa64a, 0x6fcf55, 0x8a5a36], { speed: 5, up: 6, size: 0.22, life: 1, spread: 2 });
+    }
+    for (const n of this.npcs) {
+      if (n.mode !== 'wander') continue;
+      const dx = n.x - p.x, dz = n.z - p.z;
+      const d = Math.hypot(dx, dz);
+      if (d > reach + n.radius * 0.7 || !inPath(dx, dz, d) || !n.knock(p.x, p.z)) continue;
+      if (this.swingBonks++ < 4) this.sfx.bonk(n.species.voice);
+      this.camShake = Math.max(this.camShake, 0.3);
+      this.particles.burst(this.v.set(n.x, n.y + n.species.height * n.scale * 0.8, n.z), 14, [0xffd21f, 0xffffff], { speed: 4, up: 5, size: 0.2, life: 0.9 });
+    }
+  }
+
+  /** Can this still be used? Food gets eaten, eggs hatch, dinosaurs get bowled over. */
+  private usable(t: Target): boolean {
+    if (t.type === 'food') return t.food.available;
+    if (t.type === 'npc') return t.npc.mode === 'wander' && t.npc.downT <= 0;
+    if (t.type === 'nest') return t.nest.egg !== null;
+    return true;
+  }
+
+  /**
+   * A tap on the world (touch screens). On food, a dinosaur, an egg or a crystal: use it if it is in reach,
+   * otherwise walk over and use it on arrival. Anywhere else: walk to that spot.
+   */
+  private tapAt(sx: number, sy: number) {
+    const p = this.player;
+    if (this.state !== 'play' || !p || this.eatT > 0) return;
+    const w = window.innerWidth, h = window.innerHeight;
+    const cam = this.camera;
+    cam.updateMatrixWorld();
+    // the thing under the finger, if any: generous circles, since small fingers are not precise
+    const hit = { t: null as Target | null, range: 0, d: Infinity };
+    this.eachTarget((t, range) => {
+      if (Math.hypot(t.x - p.x, t.z - p.z) > 80) return;
+      const mid = this.v.set(t.x, (t.y + t.top) / 2, t.z).project(cam);
+      if (mid.z > 1) return; // behind the camera
+      const mx = (mid.x + 1) * 0.5 * w, my = (1 - mid.y) * 0.5 * h;
+      const topY = (1 - this.v2.set(t.x, t.top, t.z).project(cam).y) * 0.5 * h;
+      const d = Math.hypot(sx - mx, sy - my);
+      if (d < Math.max(48, Math.abs(topY - my) * 1.25) && d < hit.d) {
+        hit.t = t;
+        hit.range = range;
+        hit.d = d;
+      }
+    });
+    if (hit.t) {
+      // stop a little inside its reach rather than right on the edge
+      this.goal = { x: hit.t.x, z: hit.t.z, target: hit.t, range: hit.range - 0.4, best: Infinity, stall: 0 };
+      return;
+    }
+    // otherwise find the ground under the finger by stepping along the line of sight
+    const o = cam.position;
+    const dir = this.v.set((sx / w) * 2 - 1, 1 - (sy / h) * 2, 0.5).unproject(cam).sub(o).normalize();
+    let gx = 0, gz = 0, found = false;
+    for (let d = 1; d < 260 && !found; d += 0.5) {
+      gx = o.x + dir.x * d;
+      gz = o.z + dir.z * d;
+      found = o.y + dir.y * d <= Math.max(heightAt(gx, gz), 0);
+    }
+    if (!found) {
+      // a tap on the sky: head off that way
+      const flat = Math.hypot(dir.x, dir.z);
+      if (flat < 0.01) return;
+      gx = p.x + (dir.x / flat) * 40;
+      gz = p.z + (dir.z / flat) * 40;
+    }
+    this.goal = { x: gx, z: gz, target: null, range: 0.8, best: Infinity, stall: 0 };
   }
 
   /** The roar spreading out: trees shudder and drop fruit, dinosaurs jump and call back. */
@@ -650,13 +843,7 @@ export class Game {
       if (tr.fall > 0.2) continue;
       tr.shake = 1;
       this.particles.burst(this.v.set(tr.cx, tr.top - 1, tr.cz), 8, [0x3aa64a, 0x6fcf55, 0x2f9440], { speed: 3, up: 2, size: 0.2, life: 1.2, gravity: 5, spread: 2.5 });
-      // ripe fruit comes tumbling down
-      if (tr.fruitT <= 0 && this.foods.reduce((n, f) => n + (f.once && !f.dead ? 1 : 0), 0) < 16) {
-        tr.fruitT = 25;
-        const a = Math.random() * Math.PI * 2, rr = 1.6 + Math.random() * 1.6;
-        const fx = tr.cx + Math.cos(a) * rr, fz = tr.cz + Math.sin(a) * rr;
-        if (heightAt(fx, fz) > 0.3) dropFood(this.scene, this.foods, tr.palm ? 'banana' : 'apple', fx, fz, tr.top - 1);
-      }
+      this.dropFruit(tr);
       // a full-strength roar flattens the trees closest to it
       if (w.power >= 0.95 && d < w.max * 0.55) {
         this.props.knock(tr, tr.x - w.x, tr.z - w.z);
@@ -681,11 +868,6 @@ export class Game {
     }
   }
 
-  private speakCard() {
-    const s = SPECIES[this.cardSpecies];
-    this.sfx.say(`card.${s.id}` as VoiceLine);
-  }
-
   private hatchNest(n: Nest) {
     if (!n.egg || !this.player) return;
     const s = SPECIES[n.species];
@@ -695,12 +877,12 @@ export class Game {
     this.scene.remove(n.egg);
     n.egg = null;
     n.regrow = 40;
-    const baby = new Npc(s, 0.3, n.x, n.z);
+    const baby = new Npc(s, BABY_SCALE, n.x, n.z);
     baby.mode = 'follow';
     baby.leader = this.babies[this.babies.length - 1] ?? this.player;
     baby.anim.hop = 1;
     this.scene.add(baby.root);
-    this.pops.push({ obj: baby.root, scale: 0.3, t: 0 });
+    this.pops.push({ obj: baby.root, scale: BABY_SCALE, t: 0 });
     this.babies.push(baby);
     if (this.babies.length > MAX_BABIES) {
       const old = this.babies.shift()!;
@@ -723,10 +905,51 @@ export class Game {
     if (this.chargeCool > 0) this.chargeCool -= dt;
     p.anim.charging = charging;
 
+    // which way to go: the stick steers, and takes over from any tap-to-go
+    const fx = Math.sin(this.camYaw), fz = Math.cos(this.camYaw);
+    let mx = fx * inp.y - fz * inp.x;
+    let mz = fz * inp.y + fx * inp.x;
+    const g = this.goal;
+    if (mag > 0 || busy) this.goal = null;
+    else if (g) {
+      const t = g.target;
+      if (t && !this.usable(t)) this.goal = null;
+      else {
+        if (t?.type === 'npc') {
+          // keep after it if it wanders off
+          g.x = t.npc.x;
+          g.z = t.npc.z;
+        }
+        const dx = g.x - p.x, dz = g.z - p.z;
+        const d = Math.hypot(dx, dz);
+        if (d < g.range) {
+          // there. (A pterodactyl that is still floating down waits until it can reach.)
+          if (!t) this.goal = null;
+          else if (!(p.species.flies && this.flyY > 1.5)) {
+            this.goal = null;
+            this.interact(t);
+          }
+        } else {
+          mx = dx / d;
+          mz = dz / d;
+          mag = 1;
+          // give up if something is in the way (deep water, a cliff, a wall of trees)
+          if (d < g.best - 0.02) {
+            g.best = d;
+            g.stall = 0;
+          } else if ((g.stall += dt) > 0.8) this.goal = null;
+        }
+      }
+    }
+    // feet stay planted for a neck swing
+    if (this.swingT > 0) mag = 0;
+    this.goRing.visible = this.goal !== null;
+    if (this.goal) {
+      this.goRing.position.set(this.goal.x, Math.max(heightAt(this.goal.x, this.goal.z), 0) + 0.3, this.goal.z);
+      this.goRing.scale.setScalar(1 + Math.sin(this.t * 7) * 0.12);
+    }
+
     if (mag > 0 || charging) {
-      const fx = Math.sin(this.camYaw), fz = Math.cos(this.camYaw);
-      let mx = fx * inp.y - fz * inp.x;
-      let mz = fz * inp.y + fx * inp.x;
       let boost = 1;
       if (charging) {
         // dash straight ahead (the stick can still steer a little)
@@ -975,7 +1198,9 @@ export class Game {
         const k = this.roarPower;
         this.powerRing.visible = true;
         this.powerRing.position.set(p.x, p.y + 0.35, p.z);
-        this.powerRing.scale.setScalar((1.6 + k * 4.5) * (k >= 1 ? 1 + Math.sin(this.t * 22) * 0.06 : 1));
+        // for the neck swing the ring shows exactly how far it will reach
+        const size = p.species.id === 'brachiosaurus' ? this.neckReach(Math.max(0.2, k)) : 1.6 + k * 4.5;
+        this.powerRing.scale.setScalar(size * (k >= 1 ? 1 + Math.sin(this.t * 22) * 0.06 : 1));
         (this.powerRing.material as THREE.MeshBasicMaterial).color.setHSL(0.14 - k * 0.14, 1, 0.55);
         if (k >= 1 && Math.random() < 0.5) {
           this.particles.burst(this.v.set(p.x, p.y + 0.3, p.z), 1, [0xff5a1f, 0xffd21f], { speed: 4, up: 4, size: 0.16, life: 0.5, spread: 2 });
@@ -983,6 +1208,54 @@ export class Game {
       } else this.releaseRoar();
     }
     if (!this.roarHold) this.powerRing.visible = false;
+    // tail spin: whirl round fast, easing off towards the end (the heading itself does not change)
+    if (this.spinT > 0) {
+      this.spinT = Math.max(0, this.spinT - dt);
+      const k = 1 - this.spinT / this.spinDur;
+      p.spin = this.spinT > 0 ? this.spinTurns * Math.PI * 2 * (1 - (1 - k) ** 2) : 0;
+      if (p.lift < 0.7) {
+        const a = Math.random() * Math.PI * 2, r = p.radius * 1.6;
+        this.particles.burst(this.v.set(p.x + Math.cos(a) * r, p.y + 0.2, p.z + Math.sin(a) * r), 2, [0xe8dcb8, 0xffffff, 0xcdbb8a], { speed: 4, up: 3, size: 0.2, life: 0.6, spread: 0.6 });
+      }
+    }
+    p.anim.spinning = this.spinT > 0;
+    // Neck swing, in three beats: the neck drops and winds back a little too far, whips across (slow to
+    // start, fastest at the end), then overshoots and settles before it comes back up.
+    if (this.swingT > 0) {
+      this.swingT = Math.max(0, this.swingT - dt);
+      const e = this.swingDur - this.swingT;
+      const whip = SWING_WHIP[this.swingTurns];
+      const over = 1.12;
+      let yaw: number;
+      let s = 0;
+      if (e < SWING_BACK) yaw = over * (1 - (1 - e / SWING_BACK) ** 3);
+      else if (e < SWING_BACK + whip) {
+        const k = ((e - SWING_BACK) / whip) ** 1.5;
+        s = k * k * (3 - 2 * k);
+        yaw = over * (1 - 2 * s);
+      } else {
+        s = 1;
+        const k = (e - SWING_BACK - whip) / SWING_SETTLE;
+        yaw = -over + 0.3 * (1 - (1 - k) ** 2);
+      }
+      yaw *= SWING_ARC;
+      p.anim.sweepYaw = yaw;
+      // the body twists along with the neck, and for a big swing turns right round
+      p.spin = yaw * 0.16 - Math.PI * 2 * this.swingTurns * s;
+      const ang = p.heading + p.spin + yaw;
+      if (s > 0 && ang < this.swingAng) {
+        this.sweepHit(this.swingAng, ang);
+        // a streak of air off the end of the neck
+        p.crownWorld(this.v);
+        this.particles.burst(this.v, 2, [0xffffff, 0xd8f0ff], { speed: 1.5, up: 0.5, size: 0.22, life: 0.35, gravity: 0, spread: 0.5 });
+      }
+      this.swingAng = ang;
+    } else if (this.spinT <= 0 && p.spin !== 0) {
+      // ease the leftover twist back out
+      p.spin = wrapAngle(p.spin) * Math.exp(-10 * dt);
+      if (Math.abs(p.spin) < 0.002) p.spin = 0;
+    }
+    p.anim.sweeping = this.swingT > 0;
     p.anim.windup += ((this.roarHold ? 0.35 + this.roarPower * 0.65 : 0) - p.anim.windup) * damp(10, dt);
     this.updateWave(dt);
     // growing up: a bouncy swell to the new size
@@ -1010,7 +1283,7 @@ export class Game {
   private ate(): boolean {
     const p = this.player!;
     const st = STAGES[this.stage];
-    if (!st.need) return false;
+    if (!st.need) return this.feedBaby();
     this.eaten++;
     if (this.eaten < st.need) {
       this.ui.grow(this.stage, this.eaten, st.need);
@@ -1031,6 +1304,38 @@ export class Game {
     return true;
   }
 
+  /** Fully grown: the meal is passed on to the smallest baby following along. Returns true if one grew. */
+  private feedBaby(): boolean {
+    let b: Npc | null = null;
+    for (const x of this.babies) if (x.fullScale < BABY_MAX - 0.01 && (!b || x.fullScale < b.fullScale)) b = x;
+    if (!b) return false;
+    b.grow(Math.min(BABY_MAX, b.fullScale + BABY_GROW));
+    b.anim.hop = 1;
+    this.sfx.grow();
+    this.ui.toast(`Baby ${b.species.name} got bigger! ⭐`, 2600);
+    this.sfx.say('baby.bigger');
+    this.particles.burst(this.v.set(b.x, b.y + 0.8, b.z), 30, [0xffd21f, 0xffffff, 0x8be04a, 0xff8fc0], { speed: 6, up: 8, size: 0.22, life: 1, spread: 0.8 });
+    return true;
+  }
+
+  /** Everything that could be interacted with right now, with how close the player has to be to reach it. */
+  private eachTarget(fn: (t: Target, range: number) => void) {
+    const p = this.player!;
+    for (const f of this.foods) {
+      if (f.available) fn({ type: 'food', food: f, x: f.x, z: f.z, y: f.mesh.position.y, top: f.mesh.position.y + 1.5 }, p.radius + 2.6);
+    }
+    for (const n of this.npcs) {
+      // a dinosaur that has been bowled over is in no state to chat
+      if (n.mode === 'wander' && n.downT <= 0) {
+        fn({ type: 'npc', npc: n, x: n.x, z: n.z, y: n.y + n.lift, top: n.y + n.lift + n.species.height * n.scale + 0.9 }, p.radius + n.radius + 3.4);
+      }
+    }
+    for (const n of this.nests) {
+      if (n.egg) fn({ type: 'nest', nest: n, x: n.x, z: n.z, y: n.y, top: n.y + 2.4 }, p.radius + 2.8);
+    }
+    this.caves.gems.forEach((g, cave) => fn({ type: 'gem', cave, x: g.x, z: g.z, y: g.y, top: g.y + 9.4 }, p.radius + 4.6));
+  }
+
   private findTarget() {
     const p = this.player!;
     if (p.species.flies && this.flyY > 1.5) {
@@ -1042,31 +1347,20 @@ export class Game {
     }
     let best: Target | null = null;
     let bestScore = 0;
-    const consider = (t: Target, range: number) => {
+    this.eachTarget((t, range) => {
       const score = Math.hypot(t.x - p.x, t.z - p.z) - range;
       if (score < bestScore) {
         bestScore = score;
         best = t;
       }
-    };
-    for (const f of this.foods) {
-      if (f.available) consider({ type: 'food', food: f, x: f.x, z: f.z, top: f.mesh.position.y + 1.5 }, p.radius + 2.6);
-    }
-    for (const n of this.npcs) {
-      // a dinosaur that has been bowled over is in no state to chat
-      if (n.mode === 'wander' && n.downT <= 0) {
-        consider({ type: 'npc', npc: n, x: n.x, z: n.z, top: n.y + n.lift + n.species.height * n.scale + 0.9 }, p.radius + n.radius + 3.4);
-      }
-    }
-    for (const n of this.nests) {
-      if (n.egg) consider({ type: 'nest', nest: n, x: n.x, z: n.z, top: n.y + 2.4 }, p.radius + 2.8);
-    }
-    this.caves.gems.forEach((g, cave) => consider({ type: 'gem', cave, x: g.x, z: g.z, top: g.y + 9.4 }, p.radius + 4.6));
+    });
     this.target = best as Target | null;
     const t = this.target;
     if (!t) {
       if (p.species.flies) this.ui.setAction('fly', '☁️', 'Fly!');
       else if (p.species.id === 'triceratops') this.ui.setAction('charge', '💨', 'Charge!');
+      else if (p.species.id === 'stegosaurus') this.ui.setAction('spin', '🌀', 'Spin!');
+      else if (p.species.id === 'brachiosaurus') this.ui.setAction('swing', '🦕', 'Swing!');
       else this.ui.setAction('roar', '🦖', 'Roar!');
       this.marker.visible = false;
     } else {
@@ -1147,7 +1441,7 @@ export class Game {
       const hear = (x: number, z: number, range: number) => (p ? Math.max(0, 1 - Math.hypot(x - ex, z - ez) / range) : 0);
       for (const f of this.foods) f.update(t, dt, this.mouth, Math.hypot(f.x - ex, f.z - ez) < 110);
       this.critters.update(t, dt, (x, z) => this.sfx.plop(hear(x, z, 30)));
-      const frozen = s === 'card' || s === 'book' || s === 'win';
+      const frozen = s === 'book' || s === 'win';
       for (const n of this.npcs) {
         // far-away dinos are skipped entirely; only close ones cast shadows
         const nd = n.mode === 'sky' ? 0 : Math.hypot(n.x - ex, n.z - ez);
@@ -1190,6 +1484,7 @@ export class Game {
         if (s === 'play') {
           this.updatePlayer(dt);
           this.findTarget();
+          if (this.winT > 0 && (this.winT -= dt) <= 0) this.win();
         } else {
           p.anim.move = 0;
           p.sync(dt);

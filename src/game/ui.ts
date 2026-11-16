@@ -4,7 +4,7 @@ import { isTouch } from './input';
 import type { Portraits } from './portraits';
 import type { Quality } from './settings';
 
-export type ActionKind = 'roar' | 'eat' | 'hello' | 'egg' | 'fly' | 'charge' | 'gem';
+export type ActionKind = 'roar' | 'eat' | 'hello' | 'egg' | 'fly' | 'charge' | 'spin' | 'swing' | 'gem';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -23,7 +23,6 @@ export interface UiHandlers {
   setQuality(q: Quality): void;
   openBook(): void;
   closeOverlay(): void;
-  speakCard(): void;
   tap(): void;
 }
 
@@ -44,10 +43,8 @@ export class Ui {
     click('btn-book', h.openBook);
     click('resume', h.resume);
     click('change', h.changeDino);
-    click('card-close', h.closeOverlay);
     click('book-close', h.closeOverlay);
     click('win-close', h.closeOverlay);
-    click('card-speak', h.speakCard);
     click('sound', () => {
       const on = h.toggleSound();
       $('sound').innerHTML = `<span class="emoji">${on ? '🔊' : '🔇'}</span> Sound ${on ? 'on' : 'off'}`;
@@ -130,8 +127,8 @@ export class Ui {
     $('hint').classList.add('fade');
   }
 
-  overlay(name: 'card' | 'book' | 'pause' | 'settings' | 'win' | 'none') {
-    for (const id of ['card', 'book', 'pause', 'settings', 'win']) $(id).classList.toggle('hidden', id !== name);
+  overlay(name: 'book' | 'pause' | 'settings' | 'win' | 'none') {
+    for (const id of ['book', 'pause', 'settings', 'win']) $(id).classList.toggle('hidden', id !== name);
   }
 
   setAction(kind: ActionKind, icon: string, label: string) {
@@ -139,7 +136,7 @@ export class Ui {
     if (key === this.actionKey) return;
     this.actionKey = key;
     const a = $('action');
-    a.classList.remove('eat', 'hello', 'egg', 'roar', 'fly', 'charge', 'gem', 'ready');
+    a.classList.remove('eat', 'hello', 'egg', 'roar', 'fly', 'charge', 'spin', 'swing', 'gem', 'ready');
     a.classList.add(kind);
     if (kind === 'eat' || kind === 'hello' || kind === 'egg' || kind === 'gem') a.classList.add('ready');
     const i = $('action-icon');
@@ -168,6 +165,22 @@ export class Ui {
   toast(text: string, ms = 2200) {
     const t = $('toast');
     t.textContent = text;
+    t.classList.remove('hello');
+    this.showToast(ms);
+  }
+
+  /** Saying hello to a dinosaur: its picture, name and a fact, shown without stopping the game. */
+  hello(id: SpeciesId, ms = 4500) {
+    const s = SPECIES[id];
+    const t = $('toast');
+    t.innerHTML = `<img src="${this.portraits.dino[id]}" alt="" draggable="false" /><div><b>${s.name}</b><span>${s.fact}</span></div>`;
+    t.style.setProperty('--tint', s.color);
+    t.classList.add('hello');
+    this.showToast(ms);
+  }
+
+  private showToast(ms: number) {
+    const t = $('toast');
     t.classList.remove('hidden', 'out');
     t.style.animation = 'none';
     void t.offsetWidth;
@@ -177,18 +190,6 @@ export class Ui {
       t.classList.add('out');
       this.toastTimer = window.setTimeout(() => t.classList.add('hidden'), 260);
     }, ms);
-  }
-
-  card(id: SpeciesId) {
-    const s = SPECIES[id];
-    $<HTMLImageElement>('card-img').src = this.portraits.dino[id];
-    $('card').querySelector<HTMLElement>('.card-pic')!.style.setProperty('--tint', s.color);
-    $('card-name').textContent = s.name;
-    $('card-say').textContent = s.say;
-    $('card-fact').textContent = s.fact;
-    $('card-food-icon').textContent = s.foodIcon;
-    $('card-food').textContent = s.food;
-    this.overlay('card');
   }
 
   /** Celebration for meeting every dinosaur: all the portraits, a trophy and a shower of confetti. */

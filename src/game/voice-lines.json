@@ -2,6 +2,8 @@
   "name.triceratops": "Triceratops!",
   "name.trex": "T-Rex!",
   "name.pteranodon": "Terodactyl.",
+  "name.stegosaurus": "Stegosaurus!",
+  "name.brachiosaurus": "Brachiosaurus!",
 
   "card.triceratops": "I'm a Triceratops! I have three horns on my face, and a big frill behind my head. I'm a herbivore. That means I only eat plants!",
   "card.trex": "Roar! I'm a T-Rex! I have huge teeth, and tiny little arms. I'm a carnivore. That means I eat meat!",
@@ -14,17 +16,22 @@
   "hatch.triceratops": "You are a baby Triceratops!",
   "hatch.trex": "You are a baby T-Rex!",
   "hatch.pteranodon": "You are a baby Terodactyl!",
+  "hatch.stegosaurus": "You are a baby Stegosaurus!",
+  "hatch.brachiosaurus": "You are a baby Brachiosaurus!",
 
   "grow.bigger": "You got bigger!",
   "grow.big.triceratops": "You are a big Triceratops!",
   "grow.big.trex": "You are a big T-Rex!",
   "grow.big.pteranodon": "You are a big Terodactyl!",
+  "grow.big.stegosaurus": "You are a big Stegosaurus!",
+  "grow.big.brachiosaurus": "You are a big Brachiosaurus!",
 
   "baby.triceratops": "A baby Triceratops!",
   "baby.stegosaurus": "A baby Stegosaurus!",
   "baby.trex": "A baby T-Rex!",
   "baby.brachiosaurus": "A baby Brachiosaurus!",
   "baby.pteranodon": "A baby Terodactyl!",
+  "baby.bigger": "Your baby got bigger!",
 
   "win": "You found all seven of your friends! Well done!"
 }

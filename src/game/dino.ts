@@ -49,6 +49,8 @@ export class Dino {
   /** extra height (flying hover, mushroom bounces) */
   lift = 0;
   heading = 0;
+  /** extra turn on top of the heading (a tail spin), which leaves the direction of travel alone */
+  spin = 0;
   /** sideways roll of the whole animal (banking in the air, lying on its side) and the lift that goes with it */
   tilt = 0;
   tiltLift = 0;
@@ -86,10 +88,28 @@ export class Dino {
     this.rig.root.scale.setScalar(s);
   }
 
+  private growFrom = 0;
+  private growTo = 0;
+  private growK = 1;
+  /** the size this dinosaur is (or is on its way to being) */
+  get fullScale() {
+    return this.growK < 1 ? this.growTo : this.scale;
+  }
+  /** Swell to a new size with a bit of bounce. */
+  grow(to: number) {
+    this.growFrom = this.scale;
+    this.growTo = to;
+    this.growK = 0;
+  }
+
   sync(dt: number) {
+    if (this.growK < 1) {
+      const k = (this.growK = Math.min(1, this.growK + dt * 1.1));
+      this.setScale(this.growFrom + (this.growTo - this.growFrom) * (k + Math.sin(k * Math.PI * 3) * 0.18 * (1 - k)));
+    }
     this.anim.update(dt);
     this.rig.root.position.set(this.x, this.y + this.lift + this.tiltLift + this.anim.hopY * this.scale, this.z);
-    this.rig.root.rotation.set(0, this.heading, this.tilt, 'YXZ');
+    this.rig.root.rotation.set(0, this.heading + this.spin, this.tilt, 'YXZ');
   }
 
   turnToward(angle: number, rate: number, dt: number) {
