@@ -21,5 +21,12 @@
   "baby.trex": "8563293f2916",
   "baby.brachiosaurus": "a89b505c266e",
   "baby.pteranodon": "7f3dfe2597eb",
-  "win": "5809498c182c"
+  "win": "5809498c182c",
+  "name.stegosaurus": "c773ee13f236",
+  "name.brachiosaurus": "9319f20ec031",
+  "hatch.stegosaurus": "99828e773d96",
+  "hatch.brachiosaurus": "e31e8469ca65",
+  "grow.big.stegosaurus": "4597efeee2b0",
+  "grow.big.brachiosaurus": "d04590474627",
+  "baby.bigger": "330c2e4ceef6"
 }
