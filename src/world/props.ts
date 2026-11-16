@@ -68,6 +68,8 @@ export interface Props {
   trees: Tree[];
   /** Topple a tree in the given direction; it gets back up by itself. */
   knock(tree: Tree, dirX: number, dirZ: number): void;
+  /** Draw only this share (0..1) of the small decoration: grass, flowers, ferns, bushes and pebbles. */
+  setDensity(k: number): void;
   update(t: number, dt: number): void;
 }
 
@@ -274,6 +276,8 @@ export function createProps(scene: THREE.Scene, avoid: Collider[]): Props {
   };
 
   const trees: Tree[] = [];
+  /** decoration with nothing to bump into, so it can be thinned out on slower devices */
+  const thinnable: { mesh: THREE.InstancedMesh; full: number }[] = [];
   function scatter(
     geo: THREE.BufferGeometry,
     count: number,
@@ -324,6 +328,7 @@ export function createProps(scene: THREE.Scene, avoid: Collider[]): Props {
       placed++;
     }
     mesh.count = placed;
+    if (!o.collide) thinnable.push({ mesh, full: placed });
     mesh.castShadow = o.shadow ?? false;
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
@@ -453,6 +458,10 @@ export function createProps(scene: THREE.Scene, avoid: Collider[]): Props {
       tree.dirX = dirX / len;
       tree.dirZ = dirZ / len;
       tree.down = 5;
+    },
+    setDensity(k) {
+      // instances were placed in random order, so drawing the first part of each list thins it evenly
+      for (const d of thinnable) d.mesh.count = Math.round(d.full * k);
     },
     update(t, dt) {
       // toppled trees: fall over, lie there, then stand back up

@@ -10,9 +10,10 @@ import { canWalk, caveRoof, createSky, createTerrain, createWater, heightAt, Wat
 import { Sfx, VoiceLine } from './audio';
 import { Dino, Npc } from './dino';
 import { createFoods, dropFood, Food, FOOD_INFO } from './food';
-import { Input, isTouch } from './input';
+import { Input } from './input';
 import { Particles } from './particles';
 import { renderPortraits } from './portraits';
+import { loadQuality, Quality, QUALITY, saveQuality } from './settings';
 import { Ui } from './ui';
 
 type State = 'title' | 'select' | 'hatch' | 'play' | 'card' | 'book' | 'pause' | 'win';
@@ -88,6 +89,7 @@ export class Game {
   private caves: Caves;
   private hemi: THREE.HemisphereLight;
   private caveK = 0;
+  private quality: Quality = loadQuality();
   private particles: Particles;
   private foods: Food[];
   private npcs: Npc[] = [];
@@ -163,7 +165,6 @@ export class Game {
 
   constructor(canvas: HTMLCanvasElement) {
     const r = (this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' }));
-    r.setPixelRatio(Math.min(window.devicePixelRatio, isTouch ? 1.5 : 2));
     r.shadowMap.enabled = true;
     r.shadowMap.type = THREE.PCFShadowMap;
     r.toneMapping = THREE.NoToneMapping;
@@ -173,9 +174,6 @@ export class Game {
     scene.add(createSky());
     scene.add((this.hemi = new THREE.HemisphereLight(0xdcf1ff, 0x9fb86a, 1.9)));
     const sun = (this.sun = new THREE.DirectionalLight(0xfff0cf, 2.3));
-    sun.castShadow = true;
-    const sm = isTouch ? 1024 : 2048;
-    sun.shadow.mapSize.set(sm, sm);
     const sc = sun.shadow.camera;
     sc.left = sc.bottom = -42;
     sc.right = sc.top = 42;
@@ -196,6 +194,7 @@ export class Game {
     for (const [x, z] of NEST_SPOTS) avoid.push({ x, z, r: 2.5 });
     for (const [x, z, , size] of BONE_SITES) avoid.push({ x, z, r: 8 * size });
     this.props = createProps(scene, avoid);
+    this.applyQuality();
     this.caves = createCaves(scene, this.props.colliders);
     // a surprise egg waits deep inside the first cave
     NEST_SPOTS.push([this.caves.chambers[0].x, this.caves.chambers[0].z]);
@@ -242,6 +241,12 @@ export class Game {
       toggleMusic: () => {
         this.sfx.setMusic(!this.sfx.musicOn);
         return this.sfx.musicOn;
+      },
+      quality: this.quality,
+      setQuality: (q) => {
+        this.quality = q;
+        saveQuality(q);
+        this.applyQuality();
       },
       openBook: () => {
         if (this.state !== 'play') return;
@@ -373,6 +378,21 @@ export class Game {
     n.egg.position.set(n.x, n.y + 0.15, n.z);
     this.scene.add(n.egg);
     this.pops.push({ obj: n.egg, scale: 0.9, t: 0 });
+  }
+
+  /** Match resolution, shadows and the amount of small decoration to the chosen graphics setting. */
+  private applyQuality() {
+    const q = QUALITY[this.quality];
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, q.pixelRatio));
+    const sun = this.sun;
+    sun.castShadow = q.shadowMap > 0;
+    if (sun.castShadow && sun.shadow.mapSize.x !== q.shadowMap) {
+      sun.shadow.mapSize.set(q.shadowMap, q.shadowMap);
+      // the old map is the wrong size: drop it and the renderer makes a new one
+      sun.shadow.map?.dispose();
+      sun.shadow.map = null;
+    }
+    this.props.setDensity(q.density);
   }
 
   private resize() {
@@ -1126,9 +1146,9 @@ export class Game {
       for (const n of this.npcs) {
         // far-away dinos are skipped entirely; only close ones cast shadows
         const nd = n.mode === 'sky' ? 0 : Math.hypot(n.x - ex, n.z - ez);
-        n.root.visible = nd < 135;
+        n.root.visible = nd < QUALITY[this.quality].npcRange;
         if (!n.root.visible) continue;
-        n.setShadow(nd < 55);
+        n.setShadow(nd < QUALITY[this.quality].npcShadow);
         // Dinosaurs stop to look at a visitor nearby (which also makes them easy to land on), but once a
         // pterodactyl is perched on one it carries on with its day and takes the rider along.
         const riding = p !== null && (this.perchKey === n || this.perchKey === n.rig.head);

@@ -117,6 +117,22 @@
           <button id="change" class="btn btn-alt"><span class="emoji">🥚</span> New egg</button>
           <button id="sound" class="btn btn-plain"><span class="emoji">🔊</span> Sound on</button>
           <button id="music" class="btn btn-plain"><span class="emoji">🎵</span> Music on</button>
+          <button id="open-settings" class="btn btn-plain"><span class="emoji">⚙️</span> Settings</button>
+        </div>
+      </section>
+
+      <section id="settings" class="overlay hidden">
+        <div class="panel menu">
+          <h2 class="heading small">Settings</h2>
+          <div class="setting">
+            <span id="graphics-label" class="setting-label">Graphics</span>
+            <div id="graphics" class="seg" role="group" aria-labelledby="graphics-label">
+              <button data-quality="low" aria-pressed="false">Low</button>
+              <button data-quality="medium" aria-pressed="false">Medium</button>
+              <button data-quality="high" aria-pressed="true">High</button>
+            </div>
+          </div>
+          <button id="settings-back" class="btn btn-go">OK!</button>
         </div>
       </section>
     </div>
