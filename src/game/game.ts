@@ -69,6 +69,9 @@ const CAP_TOP = 1.8;
 const PTERO_FEET = 0.5;
 /** how high the pterodactyl can climb: enough to clear the tallest trees */
 const MAX_FLY = 21;
+/** touching a cave crystal: seconds of sparkle trail, and how much faster you move while it lasts */
+const CRYSTAL_TIME = 60;
+const CRYSTAL_SPEED = 1.5;
 /** Growing up: hatch small, eat to grow. `need` = foods to reach the next size. */
 const STAGES = [
   { scale: 0.5, need: 3 },
@@ -597,7 +600,7 @@ export class Game {
       this.caves.ring(t.cave);
       this.sfx.chime();
       p.anim.hop = 1;
-      this.sparkleT = 60;
+      this.sparkleT = CRYSTAL_TIME;
       this.ui.toast('Magic sparkles! ✨', 2600);
       this.particles.burst(this.v.set(t.x, t.top - 1, t.z), 70, [0x5ff2ff, 0xff7fe0, 0xffffff, 0xffd21f, 0xb884ff], { speed: 8, up: 10, size: 0.24, life: 1.5, spread: 2 });
     } else {
@@ -744,7 +747,9 @@ export class Game {
           }
         }
       } else p.turnToward(Math.atan2(mx, mz), 10, dt);
-      const sp = p.species.speed * (0.7 + 0.3 * p.scale) * boost * dt;
+      // the crystal's magic makes you quicker for as long as the sparkles last
+      const magic = this.sparkleT > 0 ? CRYSTAL_SPEED : 1;
+      const sp = p.species.speed * (0.7 + 0.3 * p.scale) * boost * magic * dt;
       let nx = p.x + mx * sp, nz = p.z + mz * sp;
       // slide around trees, rocks and other dinos
       const pr = p.radius * 0.55;
