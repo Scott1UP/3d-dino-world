@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Dino World</string>
+    <string name="title_activity_main">Dino World</string>
+    <string name="package_name">com.scott1up.dinoworld</string>
+    <string name="custom_url_scheme">com.scott1up.dinoworld</string>
+</resources>
