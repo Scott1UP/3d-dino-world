@@ -1,0 +1,30 @@
+{
+  "name.triceratops": "Triceratops!",
+  "name.trex": "T-Rex!",
+  "name.pteranodon": "Terodactyl.",
+
+  "card.triceratops": "I'm a Triceratops! I have three horns on my face, and a big frill behind my head. I'm a herbivore. That means I only eat plants!",
+  "card.trex": "Roar! I'm a T-Rex! I have huge teeth, and tiny little arms. I'm a carnivore. That means I eat meat!",
+  "card.pteranodon": "I'm a Terodactyl! I have big wings, and I can fly high up in the sky. I swoop down to catch fish with my long beak!",
+  "card.stegosaurus": "I'm a Stegosaurus! I have big plates along my back, and spikes on my tail. I'm a herbivore. That means I only eat plants!",
+  "card.brachiosaurus": "I'm a Brachiosaurus! My neck is super long, so I can reach the leaves at the very top of the trees. I'm a herbivore. I only eat plants!",
+  "card.plesiosaurus": "I'm a Plesiosaurus! I live in the water, and I swim with my four flippers. I love to eat fish!",
+  "card.turtle": "I'm a Sea Turtle! I carry my shell everywhere I go. It keeps me safe. I paddle with my flippers, and I munch on sea plants!",
+
+  "hatch.triceratops": "You are a baby Triceratops!",
+  "hatch.trex": "You are a baby T-Rex!",
+  "hatch.pteranodon": "You are a baby Terodactyl!",
+
+  "grow.bigger": "You got bigger!",
+  "grow.big.triceratops": "You are a big Triceratops!",
+  "grow.big.trex": "You are a big T-Rex!",
+  "grow.big.pteranodon": "You are a big Terodactyl!",
+
+  "baby.triceratops": "A baby Triceratops!",
+  "baby.stegosaurus": "A baby Stegosaurus!",
+  "baby.trex": "A baby T-Rex!",
+  "baby.brachiosaurus": "A baby Brachiosaurus!",
+  "baby.pteranodon": "A baby Terodactyl!",
+
+  "win": "You found all seven of your friends! Well done!"
+}
