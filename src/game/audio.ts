@@ -28,21 +28,31 @@ export class Sfx {
   private stepIdx = 0;
   private nextBird = 0;
   private playing = true;
-  private caveBus: GainNode | null = null;
   private inCave = false;
   private nextDrip = 0;
   private roarBuf: AudioBuffer | null = null;
   private roarSrc: AudioBufferSourceNode | null = null;
   /** recorded footsteps by surface (CC0, see public/audio/CREDITS.md) */
   /** ids of the voice-over clips that exist in public/audio/voice (written by `npm run voices`) */
-  private clips = new Set<string>();
-  private clip: HTMLAudioElement | null = null;
+  private clipIds = new Set<string>();
+  private clips = new Map<string, Promise<AudioBuffer | null>>();
+  private clipSrc: AudioBufferSourceNode | null = null;
+  /** bumps on every say / hush so a clip that finishes loading late knows it is no longer wanted */
+  private sayToken = 0;
+  /** Scott's own recorded knock-over noises, played exactly as mastered (no pitch or level changes in code) */
+  private knocks: AudioBuffer[] = [];
+  /** each species' own call, used when they answer a T-Rex roar (CC0, see CREDITS.md) */
+  private calls = new Map<string, AudioBuffer>();
+  private lastKnock = -1;
   private steps: Record<'land' | 'stone' | 'water', AudioBuffer[]> = { land: [], stone: [], water: [] };
 
   constructor() {
     fetch(`${import.meta.env.BASE_URL}audio/voice/manifest.json`)
       .then((r) => r.json())
-      .then((m: Record<string, string>) => (this.clips = new Set(Object.keys(m))))
+      .then((m: Record<string, string>) => {
+        this.clipIds = new Set(Object.keys(m));
+        if (this.ctx) this.preloadClips();
+      })
       .catch(() => {});
     if ('speechSynthesis' in window) {
       this.pickVoice();
@@ -70,18 +80,6 @@ export class Sfx {
       this.noiseBuf = ctx.createBuffer(1, len, ctx.sampleRate);
       const d = this.noiseBuf.getChannelData(0);
       for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
-      // cave echo: everything sent here repeats and fades
-      this.caveBus = ctx.createGain();
-      const delay = ctx.createDelay(1);
-      delay.delayTime.value = 0.27;
-      const fb = ctx.createGain();
-      fb.gain.value = 0.42;
-      const wet = ctx.createGain();
-      wet.gain.value = 0.6;
-      this.caveBus.connect(this.master);
-      this.caveBus.connect(delay);
-      delay.connect(fb).connect(delay);
-      delay.connect(wet).connect(this.master);
       // recorded T-Rex roar (CC0, see public/audio/CREDITS.md)
       fetch(`${import.meta.env.BASE_URL}audio/trex-roar.m4a`)
         .then((r) => r.arrayBuffer())
@@ -93,6 +91,11 @@ export class Sfx {
       for (const [kind, n] of [['land', 4], ['stone', 3], ['water', 4]] as const) {
         for (let i = 1; i <= n; i++) load(`step-${kind}-${i}`).then((buf) => this.steps[kind].push(buf)).catch(() => {});
       }
+      for (const id of ['triceratops', 'stegosaurus', 'brachiosaurus', 'pteranodon', 'plesiosaurus', 'turtle']) {
+        load(`call-${id}`).then((buf) => this.calls.set(id, buf)).catch(() => {});
+      }
+      for (let i = 1; i <= 5; i++) load(`knock-${i}`).then((buf) => this.knocks.push(buf)).catch(() => {});
+      this.preloadClips();
       this.startBreeze();
       setInterval(() => this.schedule(), 120);
       this.applyBuses();
@@ -126,16 +129,16 @@ export class Sfx {
     this.applyBuses();
   }
 
-  /** Inside a cave the birds and music fade back, drips start, and every sound echoes. */
+  /** Inside a cave the birds and music fade back and water drips. */
   setCave(on: boolean) {
     if (on === this.inCave) return;
     this.inCave = on;
     this.applyBuses();
   }
 
-  /** Where one-shot effects are sent: straight out, or through the cave echo. */
+  /** Where one-shot effects are sent. */
   private get out(): GainNode {
-    return (this.inCave ? this.caveBus : this.master)!;
+    return this.master!;
   }
 
   private applyBuses(duck = false) {
@@ -290,21 +293,21 @@ export class Sfx {
       // big feet sound lower and slower; a little random variation keeps it from sounding like a loop
       src.playbackRate.value = Math.min(1.35, Math.max(0.55, 1.2 - weight * 0.28)) * (0.94 + Math.random() * 0.12);
       const g = this.ctx.createGain();
-      g.gain.value = vol * (wet ? 0.55 : 0.85);
+      g.gain.value = vol * (wet ? 0.31 : 0.48);
       src.connect(g).connect(this.out);
       src.start();
       // heavy animals also get a soft low thump underneath
-      if (!wet && weight > 1.1) this.tone('sine', 95 / Math.sqrt(weight), 40, 0.12, 0.28 * vol);
+      if (!wet && weight > 1.1) this.tone('sine', 95 / Math.sqrt(weight), 40, 0.12, 0.16 * vol);
       return;
     }
     if (wet) {
-      this.noise(0.16, 0.22 * vol, 1400, 2800, 0, 0.8);
-      this.tone('sine', 420, 180, 0.08, 0.08 * vol);
+      this.noise(0.16, 0.124 * vol, 1400, 2800, 0, 0.8);
+      this.tone('sine', 420, 180, 0.08, 0.045 * vol);
       return;
     }
     const f = 150 / Math.sqrt(weight);
-    this.tone('sine', f, f * 0.45, 0.11, 0.42 * vol);
-    this.noise(0.07, 0.16 * vol, 900 / weight, 300 / weight, 0, 0.7, 'lowpass');
+    this.tone('sine', f, f * 0.45, 0.11, 0.236 * vol);
+    this.noise(0.07, 0.09 * vol, 900 / weight, 300 / weight, 0, 0.7, 'lowpass');
   }
   flap(vol: number) {
     if (vol < 0.03) return;
@@ -354,16 +357,92 @@ export class Sfx {
     [392, 523, 659, 784, 1047, 1319, 1568].forEach((f, i) => this.tone('triangle', f, f, 0.3, 0.24, i * 0.08));
     this.tone('sine', 200, 800, 0.7, 0.2);
   }
-  /** Head-down charge: a whoosh and a drum-roll of feet. */
-  charge() {
-    this.noise(0.7, 0.3, 500, 2200, 0, 0.7);
-    for (let i = 0; i < 6; i++) this.tone('sine', 120, 55, 0.09, 0.4, i * 0.1);
+  /** A dinosaur bowled over: a surprised "oof", a thud, then a dizzy little whistle. */
+  bonk(voice: number) {
+    if (this.knocks.length && this.enabled && this.ctx) {
+      // a different one each time
+      let i = Math.floor(Math.random() * this.knocks.length);
+      if (i === this.lastKnock) i = (i + 1) % this.knocks.length;
+      this.lastKnock = i;
+      const src = this.ctx.createBufferSource();
+      src.buffer = this.knocks[i];
+      src.connect(this.out);
+      src.start();
+      return;
+    }
+    const f = 260 * voice;
+    this.tone('sawtooth', f * 1.4, f * 0.6, 0.22, 0.22);
+    this.tone('sine', 110, 45, 0.2, 0.5, 0.12);
+    this.noise(0.18, 0.3, 500, 150, 0.12, 0.7, 'lowpass');
+    [1400, 1150, 1400, 1150].forEach((n, i) => this.tone('sine', n, n * 0.9, 0.12, 0.07, 0.5 + i * 0.16));
   }
-  /** Plays a roar and returns how long it lasts (seconds), so the animation can match it. */
-  roar(voice: number, recorded = false): number {
+  /** A tree going over: creak, leafy swish, thump. */
+  timber() {
+    this.tone('sawtooth', 190, 70, 0.4, 0.14);
+    this.noise(0.6, 0.28, 2600, 700, 0.1, 0.6);
+    this.tone('sine', 85, 38, 0.25, 0.55, 0.45);
+    this.noise(0.2, 0.3, 400, 120, 0.45, 0.7, 'lowpass');
+  }
+  /** The magic crystal singing: a rising, shimmering run of bells. */
+  chime() {
+    [523, 659, 784, 988, 1175, 1319, 1568, 1976, 2349].forEach((f, i) => {
+      this.tone('sine', f, f, 1.1, 0.16, i * 0.11);
+      this.tone('triangle', f * 2, f * 2, 0.5, 0.04, i * 0.11);
+    });
+  }
+  /** Found every friend! */
+  win() {
+    const tune = [523, 523, 659, 784, 659, 784, 1047, 1047, 1319, 1568];
+    tune.forEach((f, i) => this.tone('triangle', f, f, 0.3, 0.26, i * 0.14));
+    [523, 659, 784, 1047].forEach((f) => this.tone('sine', f, f, 1.4, 0.14, tune.length * 0.14));
+  }
+  /** Head-down charge: a whoosh and a drum-roll of feet that runs for the whole dash (dur seconds). */
+  charge(dur = 0.85) {
+    this.noise(dur, 0.3, 500, 2200, 0, 0.7);
+    const beats = Math.round(dur / 0.1);
+    for (let i = 0; i < beats; i++) {
+      // alternate feet, easing off over the last few steps
+      const fade = Math.min(1, (beats - i) / 3);
+      this.tone('sine', i % 2 ? 110 : 125, 55, 0.09, 0.4 * fade, i * 0.1);
+    }
+  }
+  /**
+   * A dinosaur calling out. vol 0..1 by distance; bigger animals sound deeper.
+   * Returns how long the call lasts (seconds) so an animation can match it.
+   */
+  call(id: string, vol: number, size: number): number {
+    const buf = id === 'trex' ? this.roarBuf : this.calls.get(id);
+    const rate = Math.min(1.3, Math.max(0.7, 1.15 - size * 0.12));
+    const heard = buf ? Math.min(buf.duration, id === 'trex' ? 1.3 : 3) / rate : 0.6;
+    if (vol < 0.04 || !this.enabled || !this.ctx) return heard;
+    if (!buf) {
+      this.tone('sawtooth', 220, 140, 0.4, 0.15 * vol);
+      return heard;
+    }
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    src.playbackRate.value = rate;
+    const g = this.ctx.createGain();
+    const t = this.ctx.currentTime;
+    const len = heard;
+    g.gain.setValueAtTime(vol * 0.8, t);
+    g.gain.setValueAtTime(vol * 0.8, t + len - 0.25);
+    g.gain.linearRampToValueAtTime(0, t + len);
+    src.connect(g).connect(this.out);
+    src.start();
+    src.stop(t + len + 0.05);
+    return heard;
+  }
+
+  /**
+   * Plays a roar and returns how long it lasts (seconds), so the animation can match it.
+   * power 0..1: a quick tap gives a short, quieter roar; a fully wound-up one is the whole thing.
+   */
+  roar(voice: number, recorded = false, power = 1): number {
     if (recorded && this.roarBuf) {
-      // the roar animation should run for the whole recording even when sound is off
-      if (!this.enabled || !this.ctx || !this.master) return this.roarBuf.duration;
+      const len = this.roarBuf.duration * (0.42 + 0.58 * power);
+      // the roar animation should run for the whole roar even when sound is off
+      if (!this.enabled || !this.ctx || !this.master) return len;
     } else if (!this.enabled || !this.ctx || !this.master) return 0.9;
     if (recorded && this.roarBuf) {
       try {
@@ -374,10 +453,16 @@ export class Sfx {
       const src = (this.roarSrc = this.ctx.createBufferSource());
       src.buffer = this.roarBuf;
       const g = this.ctx.createGain();
-      g.gain.value = 0.95;
+      const t = this.ctx.currentTime;
+      const len = this.roarBuf.duration * (0.42 + 0.58 * power);
+      const level = 0.5 + 0.45 * power;
+      g.gain.setValueAtTime(level, t);
+      g.gain.setValueAtTime(level, t + len - 0.35);
+      g.gain.linearRampToValueAtTime(0, t + len);
       src.connect(g).connect(this.out);
       src.start();
-      return this.roarBuf.duration;
+      src.stop(t + len + 0.05);
+      return len;
     }
     const f = 150 * voice;
     const o = this.tone('sawtooth', f * 1.5, f * 0.7, 0.85, 0.3);
@@ -420,14 +505,42 @@ export class Sfx {
   /** Say one of the scripted lines: the recorded voice-over if we have it, otherwise the device's voice. */
   say(id: VoiceLine) {
     if (!this.enabled) return;
-    if (!this.clips.has(id)) return this.speak(LINES[id]);
     this.hush();
-    const a = (this.clip = new Audio(`${import.meta.env.BASE_URL}audio/voice/${id}.mp3`));
-    a.onplay = () => this.applyBuses(true);
-    a.onended = a.onerror = () => {
-      if (this.clip === a) this.applyBuses(false);
-    };
-    a.play().catch(() => this.speak(LINES[id]));
+    const pending = this.clips.get(id);
+    // only lines with no recording at all are read by the device voice
+    if (!pending || !this.ctx || !this.master) return this.speak(LINES[id]);
+    const token = this.sayToken;
+    void pending.then((buf) => {
+      // stopped or replaced while loading: stay silent rather than substituting another voice
+      if (token !== this.sayToken || !this.ctx || !this.master) return;
+      if (!buf) return this.speak(LINES[id]);
+      const src = (this.clipSrc = this.ctx.createBufferSource());
+      src.buffer = buf;
+      src.connect(this.master);
+      src.onended = () => {
+        if (this.clipSrc === src) {
+          this.clipSrc = null;
+          this.applyBuses(false);
+        }
+      };
+      this.applyBuses(true);
+      src.start();
+    });
+  }
+
+  /** Decode every recorded line up front so they start instantly and can't be blocked by the browser. */
+  private preloadClips() {
+    const ctx = this.ctx!;
+    for (const id of this.clipIds) {
+      if (this.clips.has(id)) continue;
+      this.clips.set(
+        id,
+        fetch(`${import.meta.env.BASE_URL}audio/voice/${id}.mp3`)
+          .then((r) => r.arrayBuffer())
+          .then((b) => ctx.decodeAudioData(b))
+          .catch(() => null),
+      );
+    }
   }
 
   speak(text: string) {
@@ -453,9 +566,15 @@ export class Sfx {
     }
   }
   hush() {
-    if (this.clip) {
-      this.clip.pause();
-      this.clip = null;
+    this.sayToken++;
+    if (this.clipSrc) {
+      const src = this.clipSrc;
+      this.clipSrc = null;
+      try {
+        src.stop();
+      } catch {
+        /* not started yet */
+      }
     }
     if ('speechSynthesis' in window) speechSynthesis.cancel();
     this.applyBuses(false);

@@ -1,21 +1,21 @@
 // The game itself: world setup, the player, camera, interactions and the state machine behind the menus.
 import * as THREE from 'three';
-import { buildEgg, HATCHABLE, SPECIES, SpeciesId } from '../dino/species';
+import { ALL_SPECIES, buildEgg, HATCHABLE, SPECIES, SpeciesId } from '../dino/species';
 import { blob, Bucket, cone, tf } from '../geo';
 import { damp, mulberry32, smoothstep, wrapAngle } from '../util';
 import { createCritters, Critters } from '../world/critters';
 import { Caves, createCaves } from '../world/caves';
-import { BONE_SITES, Collider, createProps, Props } from '../world/props';
+import { BONE_SITES, Collider, createProps, Props, treeTopAt } from '../world/props';
 import { canWalk, caveRoof, createSky, createTerrain, createWater, heightAt, Water } from '../world/terrain';
 import { Sfx, VoiceLine } from './audio';
 import { Dino, Npc } from './dino';
-import { createFoods, Food, FOOD_INFO } from './food';
+import { createFoods, dropFood, Food, FOOD_INFO } from './food';
 import { Input, isTouch } from './input';
 import { Particles } from './particles';
 import { renderPortraits } from './portraits';
 import { Ui } from './ui';
 
-type State = 'title' | 'select' | 'hatch' | 'play' | 'card' | 'book' | 'pause';
+type State = 'title' | 'select' | 'hatch' | 'play' | 'card' | 'book' | 'pause' | 'win';
 
 interface Nest {
   x: number;
@@ -26,10 +26,33 @@ interface Nest {
   regrow: number;
 }
 
+/** something a pterodactyl can land on */
+interface Perch {
+  key: object;
+  /** world height of the surface under the player */
+  top: number;
+  /** where the thing being stood on is now, so the player can be carried along with it */
+  anchor: () => { x: number; z: number; rot: number };
+}
+
+/** a roar rolling outwards across the island */
+interface Wave {
+  x: number;
+  z: number;
+  r: number;
+  max: number;
+  power: number;
+  trees: Set<object>;
+  npcs: Set<object>;
+  crashes: number;
+  bonks: number;
+}
+
 type Target =
   | { type: 'food'; food: Food; x: number; z: number; top: number }
   | { type: 'npc'; npc: Npc; x: number; z: number; top: number }
-  | { type: 'nest'; nest: Nest; x: number; z: number; top: number };
+  | { type: 'nest'; nest: Nest; x: number; z: number; top: number }
+  | { type: 'gem'; cave: number; x: number; z: number; top: number };
 
 const SPAWN = { x: 0, z: 0 };
 const NEST_SPOTS: [number, number][] = [
@@ -41,6 +64,10 @@ const MAX_BABIES = 4;
 /** bouncy mushroom cap: radius and height of the top above the ground */
 const CAP_R = 1.56;
 const CAP_TOP = 1.8;
+/** how far below its origin a perched pterodactyl's feet are (at scale 1), measured from the model */
+const PTERO_FEET = 0.5;
+/** how high the pterodactyl can climb: enough to clear the tallest trees */
+const MAX_FLY = 21;
 /** Growing up: hatch small, eat to grow. `need` = foods to reach the next size. */
 const STAGES = [
   { scale: 0.5, need: 3 },
@@ -100,6 +127,28 @@ export class Game {
   private chargeCool = 0;
   /** how many mushroom bounces in a row (each one goes higher) */
   private bounces = 0;
+  /** pterodactyl: what it is standing on (a treetop or another dinosaur), and where that was last frame */
+  private perchKey: object | null = null;
+  private perchX = 0;
+  private perchZ = 0;
+  private perchRot = 0;
+  private perchAnchor: Perch['anchor'] | null = null;
+  private v2 = new THREE.Vector3();
+  /** where a flying pterodactyl would touch down: shown as a ring so landings are easy to judge */
+  private landRing: THREE.Mesh;
+  private landDisc: THREE.Mesh;
+  /** all seven friends met: celebrate once, after the last card is closed */
+  private won = false;
+  private winPending = false;
+  /** seconds of sparkle trail left after touching the magic crystal */
+  private sparkleT = 0;
+  /** T-Rex: holding the button winds up a bigger roar */
+  private roarHold = false;
+  private roarPower = 0;
+  private wave: Wave | null = null;
+  private waveRing: THREE.Mesh;
+  private powerRing: THREE.Mesh;
+  private camShake = 0;
   private eaten = 0;
   private growT = 1;
   private growFrom = 1;
@@ -160,6 +209,20 @@ export class Game {
     this.marker.rotation.x = Math.PI;
     this.marker.visible = false;
     scene.add(this.marker);
+
+    // landing marker: a soft dark "shadow" disc with a bright ring, drawn on top of everything
+    const flat = { transparent: true, depthTest: false, depthWrite: false, toneMapped: false, side: THREE.DoubleSide };
+    this.landDisc = new THREE.Mesh(new THREE.CircleGeometry(1, 28), new THREE.MeshBasicMaterial({ ...flat, color: 0x1a1208, opacity: 0.35 }));
+    this.landRing = new THREE.Mesh(new THREE.RingGeometry(1.0, 1.28, 36), new THREE.MeshBasicMaterial({ ...flat, color: 0xffd21f, opacity: 0.95 }));
+    // roar: a ring that grows under the T-Rex while winding up, and the shockwave that rolls out
+    this.powerRing = new THREE.Mesh(new THREE.RingGeometry(0.8, 1, 40), new THREE.MeshBasicMaterial({ ...flat, color: 0xffd21f, opacity: 0.9 }));
+    this.waveRing = new THREE.Mesh(new THREE.RingGeometry(0.9, 1, 64), new THREE.MeshBasicMaterial({ ...flat, color: 0xffffff, opacity: 0.8 }));
+    for (const m of [this.landDisc, this.landRing, this.powerRing, this.waveRing]) {
+      m.rotation.x = -Math.PI / 2;
+      m.renderOrder = 5;
+      m.visible = false;
+      scene.add(m);
+    }
 
     this.ui = new Ui(renderPortraits(), {
       play: () => this.setState('select'),
@@ -340,8 +403,19 @@ export class Game {
   }
 
   private closeOverlay() {
-    if (this.state !== 'card' && this.state !== 'book' && this.state !== 'pause') return;
+    if (this.state !== 'card' && this.state !== 'book' && this.state !== 'pause' && this.state !== 'win') return;
     this.sfx.hush();
+    if (this.state === 'card' && this.winPending) {
+      // that was the last friend: time to celebrate
+      this.winPending = false;
+      this.state = 'win';
+      this.ui.win();
+      this.sfx.win();
+      this.sfx.say('win');
+      const p = this.player;
+      if (p) this.particles.burst(this.v.set(p.x, p.y + 2, p.z), 60, [0xffd21f, 0xff5e7e, 0x6fd03c, 0x3bb4f6, 0xffffff], { speed: 9, up: 11, size: 0.26, life: 1.4, spread: 2 });
+      return;
+    }
     this.ui.overlay('none');
     this.state = 'play';
   }
@@ -354,6 +428,9 @@ export class Game {
     this.player = null;
     this.target = null;
     this.ui.screen('none');
+    this.landRing.visible = this.landDisc.visible = this.powerRing.visible = this.waveRing.visible = false;
+    this.wave = null;
+    this.roarHold = false;
     this.hatchSpecies = id;
     this.hatchT = 0;
     this.hatched = false;
@@ -410,12 +487,18 @@ export class Game {
       this.roarT = 0;
       this.flying = false;
       this.chargeT = this.chargeCool = this.bounces = 0;
+      this.perchKey = null;
+      this.sparkleT = 0;
       this.hover = s.flies ? 0.5 : 0;
     }
     const p = this.player;
     if (p) {
       p.lift = this.hover;
-      if (crossed(2.5)) this.roarT = this.sfx.roar(p.species.voice, p.species.id === 'trex');
+      // first sound after hatching: the T-Rex roars, the others give their own call
+      if (crossed(2.5)) {
+        this.roarT =
+          p.species.id === 'trex' ? this.sfx.roar(p.species.voice, true) : this.sfx.call(p.species.id, 1, p.scale) + 0.25;
+      }
       if (this.roarT > 0) this.roarT -= dt;
       p.anim.roaring = this.roarT > 0.25;
       p.sync(dt);
@@ -443,7 +526,7 @@ export class Game {
   // ───────────────────────── play ─────────────────────────
 
   private action() {
-    if (this.state === 'card' || this.state === 'book') return this.closeOverlay();
+    if (this.state === 'card' || this.state === 'book' || this.state === 'win') return this.closeOverlay();
     const p = this.player;
     if (this.state !== 'play' || !p || this.eatT > 0) return;
     const t = this.target;
@@ -456,20 +539,16 @@ export class Game {
       }
       if (p.species.id === 'triceratops') {
         if (this.chargeCool > 0) return;
-        this.chargeT = 0.85;
+        // a full-grown triceratops charges for half a second longer
+        this.chargeT = this.stage === STAGES.length - 1 ? 1.35 : 0.85;
         this.chargeCool = 1.5;
-        this.sfx.charge();
+        this.sfx.charge(this.chargeT);
         return;
       }
-      if (this.roarT > 0.3) return;
-      // the roar pose lasts exactly as long as the sound
-      this.roarT = this.sfx.roar(p.species.voice, p.species.id === 'trex');
-      p.mouthWorld(this.v);
-      this.particles.burst(this.v, 16, [0xffffff, 0xffe27a], { speed: 9, up: 1.5, size: 0.16, life: 0.5, gravity: 2 });
-      for (const n of this.npcs) {
-        if (n.mode !== 'sky' && Math.hypot(n.x - p.x, n.z - p.z) < 20) n.anim.hop = 1;
-      }
-      for (const b of this.babies) b.anim.hop = 1;
+      if (this.roarT > 0.3 || this.roarHold) return;
+      // start drawing breath: the roar goes off when the button is let go (see updatePlayer)
+      this.roarHold = true;
+      this.roarPower = 0;
       return;
     }
     if (t.type === 'food') {
@@ -486,14 +565,96 @@ export class Game {
       const isNew = !this.met.has(s.id);
       this.met.add(s.id);
       this.ui.bookCount(this.met);
+      if (!this.won && this.met.size === ALL_SPECIES.length) this.won = this.winPending = true;
       this.cardSpecies = s.id;
       this.state = 'card';
       this.input.reset();
       this.ui.card(s.id);
       this.speakCard();
       if (isNew) this.particles.burst(this.v.set(t.x, t.top, t.z), 24, [0xffd21f, 0xffffff, 0xff8fc0], { speed: 5, up: 7, size: 0.2 });
+    } else if (t.type === 'gem') {
+      // the magic crystal sings, the whole cave lights up, and you leave with a sparkle trail
+      this.caves.ring(t.cave);
+      this.sfx.chime();
+      p.anim.hop = 1;
+      this.sparkleT = 60;
+      this.ui.toast('Magic sparkles! ✨', 2600);
+      this.particles.burst(this.v.set(t.x, t.top - 1, t.z), 70, [0x5ff2ff, 0xff7fe0, 0xffffff, 0xffd21f, 0xb884ff], { speed: 8, up: 10, size: 0.24, life: 1.5, spread: 2 });
     } else {
       this.hatchNest(t.nest);
+    }
+  }
+
+  /** Let the roar go. power 0..1 decides how long, how loud and how far it carries. */
+  private releaseRoar() {
+    const p = this.player!;
+    const power = Math.max(0.2, Math.min(1, this.roarPower));
+    this.roarHold = false;
+    this.powerRing.visible = false;
+    // clear away fallen fruit that has already been eaten
+    for (const f of this.foods) if (f.dead) this.scene.remove(f.mesh, f.glow);
+    this.foods = this.foods.filter((f) => !f.dead);
+    // the roar pose lasts exactly as long as the sound
+    this.roarT = this.sfx.roar(p.species.voice, p.species.id === 'trex', power);
+    this.wave = { x: p.x, z: p.z, r: 1, max: 10 + 30 * power, power, trees: new Set(), npcs: new Set(), crashes: 0, bonks: 0 };
+    if (power > 0.5) this.camShake = power * 0.55;
+    p.mouthWorld(this.v);
+    this.particles.burst(this.v, 10 + Math.round(power * 30), [0xffffff, 0xffe27a], { speed: 6 + power * 9, up: 1.5, size: 0.16 + power * 0.1, life: 0.6, gravity: 2 });
+    for (const b of this.babies) b.anim.hop = 1;
+  }
+
+  /** The roar spreading out: trees shudder and drop fruit, dinosaurs jump and call back. */
+  private updateWave(dt: number) {
+    const w = this.wave;
+    if (!w) return;
+    w.r += dt * 34;
+    const fade = 1 - w.r / w.max;
+    if (fade <= 0) {
+      this.wave = null;
+      this.waveRing.visible = false;
+      return;
+    }
+    this.waveRing.visible = true;
+    this.waveRing.position.set(w.x, Math.max(heightAt(w.x, w.z), 0) + 0.4, w.z);
+    this.waveRing.scale.setScalar(w.r);
+    (this.waveRing.material as THREE.MeshBasicMaterial).opacity = fade * 0.85;
+
+    for (const tr of this.props.trees) {
+      if (w.trees.has(tr)) continue;
+      const d = Math.hypot(tr.x - w.x, tr.z - w.z);
+      if (d > w.r) continue;
+      w.trees.add(tr);
+      if (tr.fall > 0.2) continue;
+      tr.shake = 1;
+      this.particles.burst(this.v.set(tr.cx, tr.top - 1, tr.cz), 8, [0x3aa64a, 0x6fcf55, 0x2f9440], { speed: 3, up: 2, size: 0.2, life: 1.2, gravity: 5, spread: 2.5 });
+      // ripe fruit comes tumbling down
+      if (tr.fruitT <= 0 && this.foods.reduce((n, f) => n + (f.once && !f.dead ? 1 : 0), 0) < 16) {
+        tr.fruitT = 25;
+        const a = Math.random() * Math.PI * 2, rr = 1.6 + Math.random() * 1.6;
+        const fx = tr.cx + Math.cos(a) * rr, fz = tr.cz + Math.sin(a) * rr;
+        if (heightAt(fx, fz) > 0.3) dropFood(this.scene, this.foods, tr.palm ? 'banana' : 'apple', fx, fz, tr.top - 1);
+      }
+      // a full-strength roar flattens the trees closest to it
+      if (w.power >= 0.95 && d < w.max * 0.55) {
+        this.props.knock(tr, tr.x - w.x, tr.z - w.z);
+        if (w.crashes++ < 3) this.sfx.timber();
+      }
+    }
+    for (const n of this.npcs) {
+      if (w.npcs.has(n)) continue;
+      // the ones circling overhead hear it too
+      if (Math.hypot(n.x - w.x, n.z - w.z) > w.r + (n.mode === 'sky' ? 30 : 0)) continue;
+      w.npcs.add(n);
+      // a full-strength roar bowls over the dinosaurs closest to it, just like the trees
+      if (w.power >= 0.95 && n.mode === 'wander' && Math.hypot(n.x - w.x, n.z - w.z) < w.max * 0.55) {
+        if (n.knock(w.x, w.z)) {
+          if (w.bonks++ < 4) this.sfx.bonk(n.species.voice);
+          this.particles.burst(this.v.set(n.x, n.y + n.species.height * n.scale * 0.8, n.z), 14, [0xffd21f, 0xffffff], { speed: 4, up: 5, size: 0.2, life: 0.9 });
+        }
+        continue;
+      }
+      if (n.mode !== 'sky') n.anim.hop = 1;
+      n.callOut(0.35 + Math.random() * 0.7);
     }
   }
 
@@ -554,9 +715,13 @@ export class Game {
         if (Math.random() < 0.7) {
           this.particles.burst(this.v.set(p.x - mx, p.y + 0.2, p.z - mz), 2, [0xe8dcb8, 0xffffff, 0xcdbb8a], { speed: 3, up: 3, size: 0.22, life: 0.6, spread: 1 });
         }
-        // friends jump out of the way
+        // anyone in the way gets bowled over (and gets back up a few seconds later)
         for (const n of this.npcs) {
-          if (n.mode === 'wander' && n.anim.hop === 0 && Math.hypot(n.x - p.x, n.z - p.z) < n.radius + p.radius + 3) n.anim.hop = 1;
+          if (n.mode !== 'wander' || Math.hypot(n.x - p.x, n.z - p.z) > n.radius * 0.7 + p.radius * 0.55 + 0.7) continue;
+          if (n.knock(p.x, p.z)) {
+            this.sfx.bonk(n.species.voice);
+            this.particles.burst(this.v.set(n.x, n.y + n.species.height * n.scale * 0.8, n.z), 14, [0xffd21f, 0xffffff], { speed: 4, up: 5, size: 0.2, life: 0.9 });
+          }
         }
       } else p.turnToward(Math.atan2(mx, mz), 10, dt);
       const sp = p.species.speed * (0.7 + 0.3 * p.scale) * boost * dt;
@@ -568,12 +733,21 @@ export class Game {
         const dx = nx - c.x, dz = nz - c.z;
         const d = Math.hypot(dx, dz), min = c.r + pr;
         if (d < min && d > 0.0001) {
+          if (charging && c.tree) {
+            // timber! charging a tree knocks it flat for a few seconds
+            if (c.tree.down <= 0) {
+              this.props.knock(c.tree, mx, mz);
+              this.sfx.timber();
+              this.particles.burst(this.v.set(c.x, p.y + 3, c.z), 22, [0x3aa64a, 0x6fcf55, 0x8a5a36], { speed: 5, up: 6, size: 0.22, life: 1, spread: 2 });
+            }
+            continue;
+          }
           nx = c.x + (dx / d) * min;
           nz = c.z + (dz / d) * min;
         }
       }
       for (const n of this.npcs) {
-        if (n.mode !== 'wander' || this.flyY > 5) continue;
+        if (n.mode !== 'wander' || this.flyY > 5 || n.downT > 0) continue;
         const dx = nx - n.x, dz = nz - n.z;
         const d = Math.hypot(dx, dz), min = n.radius * 0.7 + pr;
         if (d < min && d > 0.0001) {
@@ -628,19 +802,107 @@ export class Game {
       if (cap) bounce();
       else if (floor === 0) this.bounces = 0;
     }
-    const hoverT = p.species.flies ? (busy ? 0.15 : 0.55 + mag * 1.1) : 0;
+    // tuck in close when standing on a perch
+    const hoverT = p.species.flies ? (this.perchKey ? 0.05 : busy ? 0.15 : 0.55 + mag * 1.1) : 0;
     this.hover += (hoverT - this.hover) * damp(4, dt);
     if (p.species.flies) {
       if (this.flying && !this.input.held) this.flying = false;
       // climb while held, hang at the top, then drift down gently
-      const target = this.flying ? (this.flyY < 15 ? 8 : 0) : this.flyY > 0 ? -2.6 : 0;
+      const target = this.flying ? (this.flyY < MAX_FLY - 1 ? 8 : 0) : this.flyY > 0 ? -2.6 : 0;
       this.flyV += (target - this.flyV) * damp(this.flying ? 4 : 2, dt);
       // stay under the ceiling inside a cave
       const roof = caveRoof(p.x, p.z);
-      const maxFly = roof === null ? 16 : Math.max(0, roof - p.y - 3.2);
+      const maxFly = roof === null ? MAX_FLY : Math.max(0, roof - p.y - 3.2);
       this.flyY = Math.min(maxFly, Math.max(0, this.flyY + this.flyV * dt));
       if (this.flyY === 0 && !this.flying) this.flyV = 0;
-    }
+
+      // Perching: coming down onto a treetop, a dinosaur's back or a dinosaur's head, land on it.
+      // Heights come from the real shape of each model, so feet rest on the surface instead of sinking in.
+      const feet = PTERO_FEET * p.scale;
+
+      // Already standing on something? Move with it first (it may have walked, turned or dipped its head).
+      if (this.perchKey && this.perchAnchor && !this.flying) {
+        const a = this.perchAnchor();
+        const turn = a.rot - this.perchRot;
+        const c = Math.cos(turn), sn = Math.sin(turn);
+        const ox = p.x - this.perchX, oz = p.z - this.perchZ; // includes any step the player just took
+        const nx = a.x + ox * c + oz * sn, nz = a.z - ox * sn + oz * c;
+        if (canWalk(nx, nz)) {
+          p.x = nx;
+          p.z = nz;
+          p.y = p.groundY();
+          if (turn) p.heading += turn;
+        }
+        this.perchX = a.x;
+        this.perchZ = a.z;
+        this.perchRot = a.rot;
+      }
+
+      const alt = this.hover + this.flyY;
+      const plats: Perch[] = [];
+      for (const tr of this.props.trees) {
+        const top = treeTopAt(tr, p.x, p.z);
+        if (top !== null) plats.push({ key: tr, top, anchor: () => ({ x: tr.x, z: tr.z, rot: 0 }) });
+      }
+      for (const n of this.npcs) {
+        if (n.mode !== 'wander' || n.downT > 0 || Math.abs(n.x - p.x) > 16 || Math.abs(n.z - p.z) > 16) continue;
+        const back = n.backTopAt(p.x, p.z);
+        if (back !== null) plats.push({ key: n, top: back, anchor: () => ({ x: n.x, z: n.z, rot: n.heading }) });
+        // the top of the head is its own perch, and follows the head wherever it swings
+        n.crownWorld(this.v);
+        if (Math.hypot(p.x - this.v.x, p.z - this.v.z) < 0.55 * n.scale) {
+          plats.push({ key: n.rig.head, top: this.v.y, anchor: () => ({ x: n.crownWorld(this.v2).x, z: this.v2.z, rot: 0 }) });
+        }
+      }
+      // still over what we were standing on? (if not, we stepped off the edge or it was knocked over)
+      let on: Perch | null = this.perchKey && !this.flying ? (plats.find((q) => q.key === this.perchKey) ?? null) : null;
+      // the best place to come down from here (also drives the landing ring)
+      let need = 0;
+      let key: Perch | null = null;
+      for (const q of plats) {
+        const h = q.top - p.y - feet;
+        // only from above (or nearly level): never yanked up from the ground
+        if (h > need && h > 0.35 && alt > h - 0.9) {
+          need = h;
+          key = q;
+        }
+      }
+      if (!on && key && !this.flying && this.flyY <= need - this.hover + 0.05) {
+        on = key;
+        this.particles.burst(this.v.set(p.x, p.y + need + 0.2, p.z), 6, [0xffffff, 0xffe27a], { speed: 2, up: 2, size: 0.12, life: 0.5 });
+      }
+      if (on) {
+        this.flyY = Math.max(0, on.top - p.y - feet - this.hover);
+        this.flyV = 0;
+        if (this.perchKey !== on.key) {
+          const a = on.anchor();
+          this.perchX = a.x;
+          this.perchZ = a.z;
+          this.perchRot = a.rot;
+        }
+        this.perchKey = on.key;
+        this.perchAnchor = on.anchor;
+      } else {
+        this.perchKey = null;
+        this.perchAnchor = null;
+      }
+      p.anim.perched = this.perchKey !== null;
+
+      // Show where we'd come down: on the perch below (green = "you can land here") or on the ground.
+      const airborne = this.flyY > 1.2 && !this.perchKey;
+      this.landRing.visible = this.landDisc.visible = airborne;
+      if (airborne) {
+        const surface = key ? p.y + need + feet : Math.max(heightAt(p.x, p.z), 0);
+        const height = p.y + this.hover + this.flyY + feet - surface;
+        // the ring tightens as you get close, like a shadow
+        const size = p.scale * (1.1 + Math.min(height, 14) * 0.09) * (1 + Math.sin(this.t * 6) * 0.06);
+        for (const m of [this.landDisc, this.landRing]) {
+          m.position.set(p.x, surface + 0.15, p.z);
+          m.scale.setScalar(size);
+        }
+        (this.landRing.material as THREE.MeshBasicMaterial).color.set(key ? 0x6fe04a : 0xffd21f);
+      }
+    } else this.landRing.visible = this.landDisc.visible = false;
     p.lift = this.hover + this.jumpY + this.flyY;
 
     // splashes + dust
@@ -680,6 +942,24 @@ export class Game {
     }
     if (this.roarT > 0) this.roarT -= dt;
     p.anim.roaring = this.roarT > 0.25;
+    // winding up a roar: the longer the hold, the bigger it gets
+    if (this.roarHold) {
+      if (busy) this.roarHold = false;
+      else if (inp.held) {
+        this.roarPower = Math.min(1, this.roarPower + dt / 1.2);
+        const k = this.roarPower;
+        this.powerRing.visible = true;
+        this.powerRing.position.set(p.x, p.y + 0.35, p.z);
+        this.powerRing.scale.setScalar((1.6 + k * 4.5) * (k >= 1 ? 1 + Math.sin(this.t * 22) * 0.06 : 1));
+        (this.powerRing.material as THREE.MeshBasicMaterial).color.setHSL(0.14 - k * 0.14, 1, 0.55);
+        if (k >= 1 && Math.random() < 0.5) {
+          this.particles.burst(this.v.set(p.x, p.y + 0.3, p.z), 1, [0xff5a1f, 0xffd21f], { speed: 4, up: 4, size: 0.16, life: 0.5, spread: 2 });
+        }
+      } else this.releaseRoar();
+    }
+    if (!this.roarHold) this.powerRing.visible = false;
+    p.anim.windup += ((this.roarHold ? 0.35 + this.roarPower * 0.65 : 0) - p.anim.windup) * damp(10, dt);
+    this.updateWave(dt);
     // growing up: a bouncy swell to the new size
     if (this.growT < 1) {
       this.growT = Math.min(1, this.growT + dt * 1.1);
@@ -688,6 +968,12 @@ export class Game {
       p.setScale(this.growFrom + (to - this.growFrom) * (k + Math.sin(k * Math.PI * 3) * 0.18 * (1 - k)));
       if (Math.random() < 0.6) {
         this.particles.burst(this.v.set(p.x, p.y + p.species.height * p.scale * 0.6, p.z), 2, [0xffd21f, 0xffffff, 0x8be04a], { speed: 5, up: 6, size: 0.2, life: 0.8, spread: 1.5 });
+      }
+    }
+    if (this.sparkleT > 0) {
+      this.sparkleT -= dt;
+      if (Math.random() < 0.55) {
+        this.particles.burst(this.v.set(p.x, p.y + p.lift + p.species.height * p.scale * 0.5, p.z), 1, [0x5ff2ff, 0xff7fe0, 0xffffff, 0xffd21f], { speed: 1.5, up: 2.5, size: 0.16, life: 0.9, gravity: 3, spread: 1.6 });
       }
     }
     p.sync(dt);
@@ -742,13 +1028,15 @@ export class Game {
       if (f.available) consider({ type: 'food', food: f, x: f.x, z: f.z, top: f.mesh.position.y + 1.5 }, p.radius + 2.6);
     }
     for (const n of this.npcs) {
-      if (n.mode === 'wander') {
+      // a dinosaur that has been bowled over is in no state to chat
+      if (n.mode === 'wander' && n.downT <= 0) {
         consider({ type: 'npc', npc: n, x: n.x, z: n.z, top: n.y + n.lift + n.species.height * n.scale + 0.9 }, p.radius + n.radius + 3.4);
       }
     }
     for (const n of this.nests) {
       if (n.egg) consider({ type: 'nest', nest: n, x: n.x, z: n.z, top: n.y + 2.4 }, p.radius + 2.8);
     }
+    this.caves.gems.forEach((g, cave) => consider({ type: 'gem', cave, x: g.x, z: g.z, top: g.y + 9.4 }, p.radius + 4.6));
     this.target = best as Target | null;
     const t = this.target;
     if (!t) {
@@ -759,6 +1047,7 @@ export class Game {
     } else {
       if (t.type === 'food') this.ui.setAction('eat', FOOD_INFO[t.food.kind].icon, 'Eat!');
       else if (t.type === 'npc') this.ui.setAction('hello', '👋', 'Hello!');
+      else if (t.type === 'gem') this.ui.setAction('gem', '💎', 'Touch!');
       else this.ui.setAction('egg', '🥚', 'Hatch!');
       this.marker.visible = this.eatT <= 0;
       this.marker.position.set(t.x, t.top + Math.abs(Math.sin(this.t * 5)) * 0.5, t.z);
@@ -803,6 +1092,12 @@ export class Game {
     this.camera.position.lerp(this.v.set(cx, cy, cz), damp(5, dt));
     this.look.lerp(this.v.set(p.x, p.y + p.lift * 0.82 + hgt * 0.75, p.z), damp(9, dt));
     this.camera.lookAt(this.look);
+    // a big roar rattles the camera
+    if (this.camShake > 0.01) {
+      this.camShake *= Math.exp(-dt * 3.2);
+      this.camera.position.x += (Math.random() - 0.5) * this.camShake;
+      this.camera.position.y += (Math.random() - 0.5) * this.camShake;
+    }
   }
 
   // ───────────────────────── frame ─────────────────────────
@@ -818,7 +1113,7 @@ export class Game {
       const t = this.t;
       this.water.update(t);
       this.props.update(t, dt);
-      this.caves.update(t);
+      this.caves.update(t, dt);
       this.particles.update(dt);
       const p = this.player;
       if (p) p.mouthWorld(this.mouth);
@@ -827,15 +1122,24 @@ export class Game {
       const hear = (x: number, z: number, range: number) => (p ? Math.max(0, 1 - Math.hypot(x - ex, z - ez) / range) : 0);
       for (const f of this.foods) f.update(t, dt, this.mouth, Math.hypot(f.x - ex, f.z - ez) < 110);
       this.critters.update(t, dt, (x, z) => this.sfx.plop(hear(x, z, 30)));
-      const frozen = s === 'card' || s === 'book';
+      const frozen = s === 'card' || s === 'book' || s === 'win';
       for (const n of this.npcs) {
         // far-away dinos are skipped entirely; only close ones cast shadows
         const nd = n.mode === 'sky' ? 0 : Math.hypot(n.x - ex, n.z - ez);
         n.root.visible = nd < 135;
         if (!n.root.visible) continue;
         n.setShadow(nd < 55);
-        n.update(dt, s === 'play' || frozen ? p : null, this.props.colliders, frozen);
-        if (n.anim.stepped) this.sfx.step(hear(n.x, n.z, 26) * 0.55, n.scale * n.species.height * 0.5, false);
+        // Dinosaurs stop to look at a visitor nearby (which also makes them easy to land on), but once a
+        // pterodactyl is perched on one it carries on with its day and takes the rider along.
+        const riding = p !== null && (this.perchKey === n || this.perchKey === n.rig.head);
+        if (riding) n.giddyUp();
+        const notice = (s === 'play' || frozen) && !riding ? p : null;
+        n.update(dt, notice, this.props.colliders, frozen && !riding);
+        if (n.justCalled) {
+          n.justCalled = false;
+          this.sfx.call(n.species.id, n.mode === 'sky' ? 0.35 : hear(n.x, n.z, 55), n.scale);
+        }
+        if (n.anim.stepped && n.downT <= 0) this.sfx.step(hear(n.x, n.z, 26) * 0.55, n.scale * n.species.height * 0.5, false);
       }
       for (const b of this.babies) b.update(dt, p, this.props.colliders, false);
       for (const n of this.nests) {

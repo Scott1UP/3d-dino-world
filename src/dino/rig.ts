@@ -104,6 +104,10 @@ export class Animator {
   hopY = 0;
   /** head-down charging pose */
   charging = false;
+  /** 0..1: rearing back, drawing breath for a big roar */
+  windup = 0;
+  /** flyers only: standing on a perch with wings folded */
+  perched = false;
   /** true on the frame a foot lands / a wing beats down (for sound) */
   stepped = false;
   flapped = false;
@@ -113,6 +117,7 @@ export class Animator {
   private eat = 0;
   private roar = 0;
   private charge = 0;
+  private perch = 0;
   private blink = 1 + Math.random() * 4;
 
   constructor(public rig: Rig, private flies = false) {}
@@ -124,6 +129,8 @@ export class Animator {
     this.eat += ((this.eating ? 1 : 0) - this.eat) * damp(9, dt);
     this.roar += ((this.roaring ? 1 : 0) - this.roar) * damp(10, dt);
     this.charge += ((this.charging ? 1 : 0) - this.charge) * damp(12, dt);
+    this.perch += ((this.perched ? 1 : 0) - this.perch) * damp(7, dt);
+    const pk = this.perch;
     const before = this.cycle;
     this.cycle += dt * (4 + this.walk * 6);
     const w = this.walk;
@@ -140,7 +147,8 @@ export class Animator {
         leg.rotation.z = r.legSide[i] * (0.15 + s * 0.4);
         leg.rotation.y = r.legSide[i] * s * 0.25;
       } else if (this.flies) {
-        leg.rotation.x = 0.5 + Math.sin(t * 3 + i) * 0.1;
+        // trailing behind in flight, straight down to stand on a perch
+        leg.rotation.x = (0.5 + Math.sin(t * 3 + i) * 0.1) * (1 - pk);
       } else {
         const ph = this.cycle + r.legPhase[i];
         leg.rotation.x = Math.sin(ph) * r.legSwing * w;
@@ -156,13 +164,13 @@ export class Animator {
     if (this.hop > 0) this.hop = Math.max(0, this.hop - dt * 2.2);
     this.hopY = this.hop > 0 ? Math.sin((1 - this.hop) * Math.PI) * 0.6 : 0;
     r.body.position.y = y;
-    r.body.rotation.x = this.eat * r.bodyEatPitch - this.roar * 0.12 + this.charge * 0.1;
+    r.body.rotation.x = this.eat * r.bodyEatPitch - this.roar * 0.12 + this.charge * 0.1 - pk * 0.32 - this.windup * 0.2;
     r.body.rotation.z = this.flies || r.swims ? Math.sin(t * 1.4) * 0.03 : Math.sin(this.cycle) * 0.035 * w;
     // breathing
     const breath = 1 + Math.sin(t * 2) * 0.012;
     r.body.scale.set(breath, breath, 1);
 
-    r.head.rotation.x = this.eat * r.eatPitch + Math.sin(t * 1.7) * 0.03 - this.roar * 0.35 + this.charge * 0.5;
+    r.head.rotation.x = this.eat * r.eatPitch + Math.sin(t * 1.7) * 0.03 - this.roar * 0.35 + this.charge * 0.5 + this.windup * 0.3;
     r.head.rotation.y = Math.sin(t * 0.6) * 0.14 * (1 - w) * (1 - this.eat);
     r.head.rotation.z = this.roar * Math.sin(t * 30) * 0.05 + Math.sin(t * 0.43) * 0.05 * (1 - w);
 
@@ -178,9 +186,13 @@ export class Animator {
     for (const wing of r.wings) {
       const sp = 7 + w * 5;
       const a = Math.sin(t * sp);
-      if (wing.side > 0 && a < 0 && Math.sin((t - dt) * sp) >= 0) this.flapped = true;
-      wing.inner.rotation.z = wing.side * (a * 0.55 + 0.08);
-      wing.outer.rotation.z = wing.side * (Math.sin(t * sp - 0.9) * 0.6 + 0.1);
+      if (pk < 0.5 && wing.side > 0 && a < 0 && Math.sin((t - dt) * sp) >= 0) this.flapped = true;
+      // perched: wings fold down against the body, with the odd little shuffle
+      const shuffle = Math.sin(t * 1.3) * 0.04;
+      const inner = (a * 0.55 + 0.08) * (1 - pk) + (-1.25 + shuffle) * pk;
+      const outer = (Math.sin(t * sp - 0.9) * 0.6 + 0.1) * (1 - pk) + (2.35 - shuffle) * pk;
+      wing.inner.rotation.z = wing.side * inner;
+      wing.outer.rotation.z = wing.side * outer;
     }
     if (r.lids) {
       this.blink -= dt;

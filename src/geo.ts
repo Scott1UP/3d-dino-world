@@ -239,3 +239,62 @@ export function blob(radius: number, detail: number, lump: number, seed = 0): TH
 
 export const sphere = (r: number, w = 12, h = 8) => new THREE.SphereGeometry(r, w, h);
 export const cone = (r: number, h: number, seg = 7) => new THREE.ConeGeometry(r, h, seg);
+
+/** Top-surface lookup built from real geometry: "how high is this model at (x, z)?" */
+export interface HeightGrid {
+  /**
+   * Height of the highest surface at a point (model space), or null where there is nothing.
+   * pad = half the width of whatever is standing there, so it rests on the highest bit under its feet.
+   */
+  at(x: number, z: number, pad?: number): number | null;
+}
+
+/**
+ * Rasterise the triangles of some meshes into a grid of maximum heights.
+ * Used so flyers land on the true surface of a tree or another dinosaur instead of sinking into it.
+ */
+export function heightGrid(parts: { geo: THREE.BufferGeometry; matrix?: THREE.Matrix4 }[], cell = 0.22): HeightGrid {
+  const tris: THREE.Vector3[] = [];
+  const box = new THREE.Box3();
+  for (const { geo, matrix } of parts) {
+    const pos = geo.getAttribute('position');
+    const idx = geo.getIndex();
+    const n = idx ? idx.count : pos.count;
+    for (let i = 0; i < n; i++) {
+      const v = new THREE.Vector3().fromBufferAttribute(pos, idx ? idx.getX(i) : i);
+      if (matrix) v.applyMatrix4(matrix);
+      tris.push(v);
+      box.expandByPoint(v);
+    }
+  }
+  const x0 = box.min.x - cell, z0 = box.min.z - cell;
+  const w = Math.ceil((box.max.x - x0) / cell) + 2, d = Math.ceil((box.max.z - z0) / cell) + 2;
+  const h = new Float32Array(w * d).fill(-Infinity);
+  const put = (x: number, y: number, z: number) => {
+    const i = Math.floor((x - x0) / cell) + Math.floor((z - z0) / cell) * w;
+    if (y > h[i]) h[i] = y;
+  };
+  for (let t = 0; t < tris.length; t += 3) {
+    const a = tris[t], b = tris[t + 1], c = tris[t + 2];
+    // sample finely enough that no cell under the triangle is missed
+    const steps = Math.max(1, Math.ceil(Math.max(a.distanceTo(b), b.distanceTo(c), c.distanceTo(a)) / (cell * 0.5)));
+    for (let i = 0; i <= steps; i++) {
+      for (let j = 0; j <= steps - i; j++) {
+        const u = i / steps, v = j / steps, k = 1 - u - v;
+        put(a.x * k + b.x * u + c.x * v, a.y * k + b.y * u + c.y * v, a.z * k + b.z * u + c.z * v);
+      }
+    }
+  }
+  return {
+    at(x, z, pad = 0) {
+      const cell0 = (px: number, pz: number) => {
+        const cx = Math.floor((px - x0) / cell), cz = Math.floor((pz - z0) / cell);
+        return cx < 0 || cz < 0 || cx >= w || cz >= d ? -Infinity : h[cx + cz * w];
+      };
+      const centre = cell0(x, z);
+      if (centre === -Infinity) return null;
+      // the highest point under the footprint, so feet never dip into a slope
+      return Math.max(centre, cell0(x - pad, z - pad), cell0(x + pad, z - pad), cell0(x - pad, z + pad), cell0(x + pad, z + pad));
+    },
+  };
+}

@@ -3,7 +3,7 @@ import { ALL_SPECIES, PLAYABLE, SPECIES, SpeciesId } from '../dino/species';
 import { isTouch } from './input';
 import type { Portraits } from './portraits';
 
-export type ActionKind = 'roar' | 'eat' | 'hello' | 'egg' | 'fly' | 'charge';
+export type ActionKind = 'roar' | 'eat' | 'hello' | 'egg' | 'fly' | 'charge' | 'gem';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -42,6 +42,7 @@ export class Ui {
     click('change', h.changeDino);
     click('card-close', h.closeOverlay);
     click('book-close', h.closeOverlay);
+    click('win-close', h.closeOverlay);
     click('card-speak', h.speakCard);
     click('sound', () => {
       const on = h.toggleSound();
@@ -108,8 +109,8 @@ export class Ui {
     $('hint').classList.add('fade');
   }
 
-  overlay(name: 'card' | 'book' | 'pause' | 'none') {
-    for (const id of ['card', 'book', 'pause']) $(id).classList.toggle('hidden', id !== name);
+  overlay(name: 'card' | 'book' | 'pause' | 'win' | 'none') {
+    for (const id of ['card', 'book', 'pause', 'win']) $(id).classList.toggle('hidden', id !== name);
   }
 
   setAction(kind: ActionKind, icon: string, label: string) {
@@ -117,9 +118,9 @@ export class Ui {
     if (key === this.actionKey) return;
     this.actionKey = key;
     const a = $('action');
-    a.classList.remove('eat', 'hello', 'egg', 'roar', 'fly', 'charge', 'ready');
+    a.classList.remove('eat', 'hello', 'egg', 'roar', 'fly', 'charge', 'gem', 'ready');
     a.classList.add(kind);
-    if (kind === 'eat' || kind === 'hello' || kind === 'egg') a.classList.add('ready');
+    if (kind === 'eat' || kind === 'hello' || kind === 'egg' || kind === 'gem') a.classList.add('ready');
     const i = $('action-icon');
     i.textContent = icon;
     i.classList.remove('swap');
@@ -167,6 +168,32 @@ export class Ui {
     $('card-food-icon').textContent = s.foodIcon;
     $('card-food').textContent = s.food;
     this.overlay('card');
+  }
+
+  /** Celebration for meeting every dinosaur: all the portraits, a trophy and a shower of confetti. */
+  win() {
+    const grid = $('win-grid');
+    grid.innerHTML = '';
+    for (const id of ALL_SPECIES) {
+      const d = document.createElement('div');
+      d.className = 'pic';
+      d.style.setProperty('--tint', SPECIES[id].color);
+      d.innerHTML = `<img src="${this.portraits.dino[id]}" alt="" draggable="false" />`;
+      grid.appendChild(d);
+    }
+    const confetti = $('confetti');
+    confetti.innerHTML = '';
+    const colors = ['#ff5e7e', '#ffc21f', '#6fd03c', '#3bb4f6', '#b58cff', '#ff9f1c'];
+    for (let i = 0; i < 70; i++) {
+      const s = document.createElement('i');
+      s.style.cssText =
+        `left:${Math.random() * 100}%;background:${colors[i % colors.length]};` +
+        `animation-delay:${(-Math.random() * 3).toFixed(2)}s;animation-duration:${(2.4 + Math.random() * 2).toFixed(2)}s;` +
+        `width:${8 + Math.random() * 10}px;height:${10 + Math.random() * 14}px;`;
+      confetti.appendChild(s);
+    }
+    this.overlay('win');
+    $('btn-book').classList.add('complete');
   }
 
   bookCount(met: Set<SpeciesId>) {

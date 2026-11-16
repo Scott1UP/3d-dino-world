@@ -133,6 +133,19 @@ export class Food {
   private flyFrom = new THREE.Vector3();
   private baseY: number;
   private phase = Math.random() * 6;
+  /** shaken out of a tree: falls from this height, is eaten once, and does not grow back */
+  once = false;
+  dead = false;
+  private drop = 1;
+  private dropFrom = 0;
+
+  /** Start up in a tree and tumble to the ground. */
+  fall(fromY: number) {
+    this.once = true;
+    this.drop = 0;
+    this.dropFrom = fromY;
+    this.available = false;
+  }
 
   constructor(public kind: FoodKind, geo: THREE.BufferGeometry, public x: number, public z: number) {
     this.mesh = new THREE.Mesh(geo, foodMat);
@@ -155,6 +168,26 @@ export class Food {
   }
 
   update(t: number, dt: number, mouth: THREE.Vector3, near: boolean) {
+    if (this.dead) {
+      this.mesh.visible = this.glow.visible = false;
+      return;
+    }
+    if (this.drop < 1) {
+      // tumbling out of the tree, with a little bounce when it lands
+      this.drop = Math.min(1, this.drop + dt * 1.25);
+      const k = this.drop;
+      const bounce = k < 0.6 ? 1 - (k / 0.6) ** 2 : Math.sin(((k - 0.6) / 0.4) * Math.PI) * 0.12;
+      this.mesh.visible = true;
+      this.glow.visible = false;
+      this.mesh.position.set(this.x, this.baseY + 0.12 + (this.dropFrom - this.baseY) * bounce, this.z);
+      this.mesh.rotation.x = (1 - k) * 6;
+      this.mesh.scale.setScalar(SIZE);
+      if (k >= 1) {
+        this.mesh.rotation.x = 0;
+        this.available = true;
+      }
+      return;
+    }
     // far-away food is hidden entirely: fewer draw calls on tablets
     if (!near && this.fly < 0) {
       this.mesh.visible = this.glow.visible = false;
@@ -177,6 +210,7 @@ export class Food {
         this.mesh.visible = false;
         this.grown = 0;
         this.regrow = 24;
+        if (this.once) this.dead = true;
       }
       return;
     }
@@ -203,9 +237,20 @@ export class Food {
   }
 }
 
+let geoCache: Record<FoodKind, THREE.BufferGeometry> | null = null;
+
+/** Drop a piece of food out of a tree at (x, z), starting from height fromY. */
+export function dropFood(scene: THREE.Scene, foods: Food[], kind: FoodKind, x: number, z: number, fromY: number) {
+  if (!geoCache) return;
+  const f = new Food(kind, geoCache[kind], x, z);
+  f.fall(fromY);
+  scene.add(f.mesh, f.glow);
+  foods.push(f);
+}
+
 export function createFoods(scene: THREE.Scene, colliders: Collider[], rng: () => number): Food[] {
   const kinds: FoodKind[] = ['melon', 'apple', 'banana', 'fish', 'meat', 'berries'];
-  const geos = Object.fromEntries(kinds.map((k) => [k, foodGeo(k)])) as Record<FoodKind, THREE.BufferGeometry>;
+  const geos = (geoCache = Object.fromEntries(kinds.map((k) => [k, foodGeo(k)])) as Record<FoodKind, THREE.BufferGeometry>);
   const foods: Food[] = [];
   const place = (kind: FoodKind, x: number, z: number) => {
     const f = new Food(kind, geos[kind], x, z);

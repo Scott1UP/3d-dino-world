@@ -461,6 +461,7 @@ button {
 #action.egg { --face: var(--pink); --edge: #d43a5c; }
 #action.fly { --face: #b58cff; --edge: #7e52d6; }
 #action.charge { --face: #2fc4b2; --edge: #1c8f8a; }
+#action.gem { --face: #5fd8ff; --edge: #2a9fd6; }
 #action.ready {
   animation: pulse 0.9s ease-in-out infinite;
 }
@@ -638,6 +639,61 @@ button {
   gap: 16px;
 }
 
+#btn-book.complete {
+  background: #ffe27a;
+  box-shadow: inset 0 -7px 0 #f2b93b, 0 5px 0 rgba(40, 20, 5, 0.85), 0 0 22px 6px rgba(255, 210, 31, 0.8);
+}
+.trophy {
+  font-size: clamp(64px, 16vmin, 120px);
+  margin: -8px 0 -14px;
+  animation: trophy 0.9s var(--pop) both, bob 1.8s ease-in-out 0.9s infinite;
+}
+@keyframes trophy {
+  from { transform: scale(0) rotate(-40deg); }
+}
+#win-grid {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: clamp(6px, 1.4vmin, 12px);
+  max-width: 620px;
+}
+#win-grid .pic {
+  width: clamp(58px, 12vmin, 92px);
+  aspect-ratio: 1;
+  border-radius: 20px;
+  border: 4px solid var(--ink);
+  background: radial-gradient(circle at 50% 35%, #fff 0%, var(--tint, #bfe8ff) 80%);
+  overflow: hidden;
+  animation: card-in 0.5s var(--pop) both;
+}
+#win-grid .pic:nth-child(2) { animation-delay: 0.08s; }
+#win-grid .pic:nth-child(3) { animation-delay: 0.16s; }
+#win-grid .pic:nth-child(4) { animation-delay: 0.24s; }
+#win-grid .pic:nth-child(5) { animation-delay: 0.32s; }
+#win-grid .pic:nth-child(6) { animation-delay: 0.4s; }
+#win-grid .pic:nth-child(7) { animation-delay: 0.48s; }
+#win-grid .pic img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+#confetti {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+#confetti i {
+  position: absolute;
+  top: -30px;
+  border-radius: 3px;
+  animation: confetti linear infinite;
+}
+@keyframes confetti {
+  to { transform: translateY(110vh) rotate(720deg); }
+}
+
 #book-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -690,5 +746,5 @@ button {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .btn-huge, #action.ready, .egg-card .egg-img, .card-pic img, .loading-egg { animation: none; }
+  .btn-huge, #action.ready, .egg-card .egg-img, .card-pic img, .loading-egg, #confetti i, .trophy { animation: none; }
 }

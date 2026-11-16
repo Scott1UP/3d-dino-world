@@ -1,13 +1,47 @@
 // Everything that decorates the island: trees, rocks, flowers, grass, fossil bones, clouds, bouncy mushrooms.
 import * as THREE from 'three';
-import { blob, Bucket, Col, cylBetween, flatPoly, plain, sphere, tf, tube } from '../geo';
-import { mulberry32 } from '../util';
+import { blob, Bucket, Col, cylBetween, flatPoly, HeightGrid, heightGrid, plain, sphere, tf, tube } from '../geo';
+import { damp, mulberry32 } from '../util';
 import { caveAt, heightAt, VOLCANO } from './terrain';
 
 export interface Collider {
   x: number;
   z: number;
   r: number;
+  /** set when this collider is a tree trunk (trees can be knocked over and perched on) */
+  tree?: Tree;
+}
+
+export interface Tree {
+  /** trunk base */
+  x: number;
+  z: number;
+  y: number;
+  /** middle of the leafy top, its radius, and how high it is: a perch for flyers */
+  cx: number;
+  cz: number;
+  r: number;
+  top: number;
+  /** 0 = standing, 1 = flat on the ground */
+  fall: number;
+  /** seconds left lying down */
+  down: number;
+  dirX: number;
+  dirZ: number;
+  mesh: THREE.InstancedMesh;
+  index: number;
+  s: number;
+  sy: number;
+  rot: number;
+  collider: Collider;
+  trunkR: number;
+  palm: boolean;
+  /** the real shape of the top of the tree (shared by every tree of the same kind) */
+  grid: HeightGrid;
+  /** 1 → 0 while it shudders from a roar */
+  shake: number;
+  /** seconds until it has fruit to drop again */
+  fruitT: number;
 }
 
 export interface Mushroom {
@@ -17,9 +51,23 @@ export interface Mushroom {
   squash: number;
 }
 
+/** World height of the top of a standing tree at a point, or null if that point is not over its leaves. */
+export function treeTopAt(tr: Tree, x: number, z: number): number | null {
+  if (tr.fall > 0.2) return null;
+  const dx = x - tr.x, dz = z - tr.z;
+  if (Math.abs(dx) > 8 || Math.abs(dz) > 8) return null;
+  const c = Math.cos(tr.rot), s = Math.sin(tr.rot);
+  const h = tr.grid.at((dx * c - dz * s) / tr.s, (dx * s + dz * c) / tr.s, 0.2 / tr.s);
+  // only the leafy top counts, not the trunk or roots
+  return h === null || h < 2.6 ? null : tr.y + h * tr.sy;
+}
+
 export interface Props {
   colliders: Collider[];
   mushrooms: Mushroom[];
+  trees: Tree[];
+  /** Topple a tree in the given direction; it gets back up by itself. */
+  knock(tree: Tree, dirX: number, dirZ: number): void;
   update(t: number, dt: number): void;
 }
 
@@ -69,6 +117,41 @@ function treeGeo(): THREE.BufferGeometry {
     [0.1, 5.1, -0.2, 1.1, 0x6fcf55], [-0.3, 3.5, 1.1, 1.0, 0x48b34c],
   ];
   leaves.forEach(([x, y, z, r, c], i) => b.add(blob(r, 1, 0.16, i), c, tf(x, y, z), true));
+  return b.geometry();
+}
+
+/** A giant: a long bare trunk with broad tiers of leaves at the top, well above everything else. */
+function tallTreeGeo(): THREE.BufferGeometry {
+  const b = new Bucket();
+  const bark = new THREE.Color(0x7a4f30), bark2 = new THREE.Color(0x66402a);
+  b.add(
+    tube(
+      [
+        { y: -0.4, z: 0, rx: 0.62, ry: 0.62 },
+        { y: 1.2, z: 0.02, rx: 0.44, ry: 0.44 },
+        { y: 5, z: 0.1, rx: 0.36, ry: 0.36 },
+        { y: 9, z: 0.04, rx: 0.28, ry: 0.28 },
+        { y: 11.6, z: 0, rx: 0.16, ry: 0.16 },
+      ],
+      (u, _d, out) => void out.copy(Math.sin(u * 60) > 0.2 ? bark : bark2), 8, 4,
+    ),
+    null,
+  );
+  // root flares
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2 + 0.4;
+    b.add(cylBetween([Math.cos(a) * 0.25, 0.9, Math.sin(a) * 0.25], [Math.cos(a) * 1.0, -0.3, Math.sin(a) * 1.0], 0.2, 0.26, 5), 0x66402a, undefined, true);
+  }
+  // three wide, flattish tiers of foliage
+  const tiers: [number, number, number, Col][] = [[8.6, 2.9, 0.42, 0x2f9440], [10.3, 2.3, 0.45, 0x3aa64a], [11.8, 1.5, 0.6, 0x55bd4f]];
+  tiers.forEach(([y, r, squash, c], i) => {
+    b.add(blob(r, 1, 0.14, 20 + i), c, tf(i * 0.15 - 0.15, y, (i % 2) * 0.2 - 0.1, 0, i * 1.1, 0, 1, squash, 1), true);
+  });
+  // a couple of side boughs lower down
+  b.add(cylBetween([0, 6.4, 0.1], [1.7, 7.4, 0.4], 0.14, 0.08, 5), 0x7a4f30, undefined, true);
+  b.add(blob(1.05, 1, 0.16, 31), 0x48b34c, tf(2.0, 7.6, 0.45, 0, 0, 0, 1, 0.6, 1), true);
+  b.add(cylBetween([0, 5.6, 0.1], [-1.4, 6.5, -0.5], 0.14, 0.08, 5), 0x7a4f30, undefined, true);
+  b.add(blob(0.95, 1, 0.16, 32), 0x3aa64a, tf(-1.65, 6.7, -0.6, 0, 0, 0, 1, 0.6, 1), true);
   return b.geometry();
 }
 
@@ -177,6 +260,10 @@ export function createProps(scene: THREE.Scene, avoid: Collider[]): Props {
   const colliders: Collider[] = [];
   const dummy = new THREE.Object3D();
   const tint = new THREE.Color();
+  const tiltAxis = new THREE.Vector3();
+  const upAxis = new THREE.Vector3(0, 1, 0);
+  const qTilt = new THREE.Quaternion();
+  const qYaw = new THREE.Quaternion();
 
   const clear = (x: number, z: number, pad: number) => {
     // nothing grows inside the caves
@@ -186,12 +273,16 @@ export function createProps(scene: THREE.Scene, avoid: Collider[]): Props {
     return true;
   };
 
+  const trees: Tree[] = [];
   function scatter(
     geo: THREE.BufferGeometry,
     count: number,
     o: {
       radius: number; accept: (x: number, z: number, h: number, r: number) => boolean;
       scale: [number, number]; sink?: number; collide?: number; shadow?: boolean; tint?: number; pad?: number;
+      /** make each one a knock-over-able, perch-able tree: canopy height, radius and forward lean (all at scale 1) */
+      tree?: { top: number; r: number; lean: number };
+      grid?: HeightGrid;
     },
   ) {
     const mesh = new THREE.InstancedMesh(geo, flatMat, count);
@@ -208,14 +299,28 @@ export function createProps(scene: THREE.Scene, avoid: Collider[]): Props {
         if (hit) continue;
       }
       const s = o.scale[0] + rng() * (o.scale[1] - o.scale[0]);
+      const rot = rng() * Math.PI * 2;
+      const sy = s * (0.9 + rng() * 0.2);
       dummy.position.set(x, h - (o.sink ?? 0) * s, z);
-      dummy.rotation.set(0, rng() * Math.PI * 2, 0);
-      dummy.scale.set(s, s * (0.9 + rng() * 0.2), s);
+      dummy.rotation.set(0, rot, 0);
+      dummy.scale.set(s, sy, s);
       dummy.updateMatrix();
       mesh.setMatrixAt(placed, dummy.matrix);
       const v = 1 - rng() * (o.tint ?? 0.12);
       mesh.setColorAt(placed, tint.setRGB(v, v, v * (0.92 + rng() * 0.08)));
-      if (o.collide) colliders.push({ x, z, r: o.collide * s });
+      if (o.collide) {
+        const collider: Collider = { x, z, r: o.collide * s };
+        colliders.push(collider);
+        if (o.tree) {
+          const tree: Tree = {
+            x, z, y: h, cx: x + Math.sin(rot) * o.tree.lean * s, cz: z + Math.cos(rot) * o.tree.lean * s,
+            r: o.tree.r * s, top: h + o.tree.top * sy, fall: 0, down: 0, dirX: 1, dirZ: 0,
+            mesh, index: placed, s, sy, rot, collider, trunkR: collider.r, palm: o.tree.lean > 0, shake: 0, fruitT: 0, grid: o.grid!,
+          };
+          collider.tree = tree;
+          trees.push(tree);
+        }
+      }
       placed++;
     }
     mesh.count = placed;
@@ -249,12 +354,16 @@ export function createProps(scene: THREE.Scene, avoid: Collider[]): Props {
   }
 
   const meadow = (_x: number, _z: number, h: number, r: number) => r < 176 && h > 1.0 && h < 7;
-  scatter(palmGeo(), 78, {
-    radius: 182, scale: [0.9, 1.5], collide: 0.45, shadow: true, pad: 3,
+  const palm = palmGeo();
+  scatter(palm, 78, {
+    grid: heightGrid([{ geo: palm }]),
+    radius: 182, scale: [0.9, 1.5], collide: 0.45, shadow: true, pad: 3, tree: { top: 4.85, r: 1.7, lean: 0.98 },
     accept: (_x, _z, h) => h > 0.6 && h < 3.4 && (h < 1.7 || rng() < 0.2),
   });
-  scatter(treeGeo(), 86, {
-    radius: 182, scale: [0.9, 1.7], collide: 0.5, shadow: true, pad: 4,
+  const leafy = treeGeo();
+  scatter(leafy, 86, {
+    grid: heightGrid([{ geo: leafy }]),
+    radius: 182, scale: [0.9, 1.7], collide: 0.5, shadow: true, pad: 4, tree: { top: 5.9, r: 2.1, lean: 0 },
     accept: (_x, _z, h, r) => h > 1.6 && h < 9 && (r > 45 || rng() < 0.3),
   });
   for (let i = 0; i < 3; i++) {
@@ -276,6 +385,14 @@ export function createProps(scene: THREE.Scene, avoid: Collider[]): Props {
     scatter(flowerGeo(c), 190, { radius: 170, scale: [1.2, 2.0], accept: meadow, tint: 0.05, pad: 0 });
   }
   scatter(grassGeo(), 5600, { radius: 172, scale: [0.8, 1.7], accept: (_x, _z, h) => h > 1.2 && h < 7, tint: 0.25, pad: -2 });
+
+  // giant trees, placed last so the rest of the island stays exactly where it was
+  const tall = tallTreeGeo();
+  scatter(tall, 40, {
+    grid: heightGrid([{ geo: tall }]),
+    radius: 180, scale: [0.9, 1.25], collide: 0.6, shadow: true, pad: 5, tree: { top: 12.6, r: 2.9, lean: 0 },
+    accept: (_x, _z, h, r) => h > 1.6 && h < 8 && r > 30,
+  });
 
   // bouncy mushrooms
   const mushrooms: Mushroom[] = [];
@@ -329,7 +446,36 @@ export function createProps(scene: THREE.Scene, avoid: Collider[]): Props {
   return {
     colliders,
     mushrooms,
+    trees,
+    knock(tree, dirX, dirZ) {
+      if (tree.down > 0) return;
+      const len = Math.hypot(dirX, dirZ) || 1;
+      tree.dirX = dirX / len;
+      tree.dirZ = dirZ / len;
+      tree.down = 5;
+    },
     update(t, dt) {
+      // toppled trees: fall over, lie there, then stand back up
+      for (const tr of trees) {
+        if (tr.fruitT > 0) tr.fruitT -= dt;
+        if (tr.down <= 0 && tr.fall === 0 && tr.shake === 0) continue;
+        tr.shake = Math.max(0, tr.shake - dt * 1.1);
+        tr.down = Math.max(0, tr.down - dt);
+        const target = tr.down > 1.1 ? 1 : 0;
+        tr.fall += (target - tr.fall) * damp(target ? 7 : 3.5, dt);
+        if (!target && tr.fall < 0.004) tr.fall = 0;
+        tr.collider.r = tr.fall > 0.25 ? 0 : tr.trunkR;
+        // tip over about the base, away from whoever hit it
+        tiltAxis.set(tr.dirZ, 0, -tr.dirX);
+        qTilt.setFromAxisAngle(tiltAxis, tr.fall * 1.5 + Math.sin(t * 30) * 0.07 * tr.shake);
+        qYaw.setFromAxisAngle(upAxis, tr.rot);
+        dummy.position.set(tr.x, tr.y, tr.z);
+        dummy.quaternion.copy(qTilt).multiply(qYaw);
+        dummy.scale.set(tr.s, tr.sy, tr.s);
+        dummy.updateMatrix();
+        tr.mesh.setMatrixAt(tr.index, dummy.matrix);
+        tr.mesh.instanceMatrix.needsUpdate = true;
+      }
       for (const c of clouds) {
         c.position.x += dt * 1.6;
         if (c.position.x > 620) c.position.x = -620;

@@ -10,7 +10,11 @@ import { baseHeight, caveAt, caveRoof, CAVES, detailTexture, heightAt, rockColor
 export interface Caves {
   /** good spots (deep in each chamber) for something special */
   chambers: { x: number; z: number }[];
-  update(t: number): void;
+  /** the big magic crystal deep in each cave: touch it and it sings */
+  gems: { x: number; z: number; y: number }[];
+  /** make a cave's crystals light up and shimmer */
+  ring(cave: number): void;
+  update(t: number, dt: number): void;
 }
 
 const toWorld = (cave: number, along: number, lat: number): [number, number] => {
@@ -104,6 +108,9 @@ export function createCaves(scene: THREE.Scene, colliders: Collider[]): Caves {
   const glowTex = glowTexture();
   const glows: THREE.Sprite[] = [];
   const chambers: { x: number; z: number }[] = [];
+  const gemSpots: { x: number; z: number; y: number }[] = [];
+  const ringT: number[] = [];
+  const hue = new THREE.Color();
   const palettes = [
     [0x5ff2ff, 0x39b8ff, 0xb6fbff],
     [0xff7fe0, 0xb884ff, 0xffc2f3],
@@ -186,6 +193,9 @@ export function createCaves(scene: THREE.Scene, colliders: Collider[]): Caves {
       );
       glow.position.set(p.x, p.y + 1.2, p.z);
       glow.userData.phase = rng() * 6;
+      glow.userData.cave = cave;
+      glow.userData.base = pal[0];
+      glow.userData.size = 5.5;
       scene.add(glow);
       glows.push(glow);
       colliders.push({ x: p.x, z: p.z, r: 0.7 });
@@ -220,17 +230,55 @@ export function createCaves(scene: THREE.Scene, colliders: Collider[]): Caves {
       colliders.push({ x: sx, z: sz, r: 1.1 });
     }
 
+    // the reward for exploring: one huge crystal standing in the middle of the chamber
+    {
+      const [gx, gz] = toWorld(cave, 193, 0);
+      const BIG = 1.45;
+      const gy = heightAt(gx, gz);
+      const shards: [number, number, number, number, number][] = [
+        [0, 0, 4.2, 0, 0], [0.9, 0.3, 2.9, 0.35, 0.2], [-0.8, 0.5, 2.6, -0.3, 0.25], [0.2, -0.9, 2.2, 0.1, -0.4], [-0.5, -0.6, 1.6, -0.25, -0.3],
+      ];
+      shards.forEach(([ox, oz, h, rz, rx], k) => {
+        const w = (0.55 - k * 0.05) * BIG;
+        gems.add(new THREE.OctahedronGeometry(1), pal[k % pal.length], tf(gx + ox * BIG, gy + h * BIG * 0.72, gz + oz * BIG, rx, k, rz, w, h * BIG, w));
+      });
+      const glow = new THREE.Sprite(
+        new THREE.SpriteMaterial({ map: glowTex, color: pal[0], transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.8, toneMapped: false }),
+      );
+      glow.position.set(gx, gy + 3.8, gz);
+      glow.userData = { phase: 0, cave, base: pal[0], size: 19 };
+      scene.add(glow);
+      glows.push(glow);
+      colliders.push({ x: gx, z: gz, r: 1.9 });
+      gemSpots.push({ x: gx, z: gz, y: gy });
+      ringT.push(0);
+    }
+
     const rocks = new THREE.Mesh(rock.geometry(), flatMat);
     rocks.castShadow = true;
     scene.add(rocks, new THREE.Mesh(gems.geometry(), crystalMat));
-    const [chx, chz] = toWorld(cave, 192, 0);
+    // (the middle belongs to the crystal, so the "something special" spot sits to one side of it)
+    const [chx, chz] = toWorld(cave, 187, cave ? 8 : -8);
     chambers.push({ x: chx, z: chz });
   });
 
   return {
     chambers,
-    update(t) {
-      for (const g of glows) g.scale.setScalar(5.5 + Math.sin(t * 1.7 + g.userData.phase) * 0.9);
+    gems: gemSpots,
+    ring(cave) {
+      ringT[cave] = 6;
+    },
+    update(t, dt) {
+      for (let i = 0; i < ringT.length; i++) ringT[i] = Math.max(0, ringT[i] - dt);
+      for (const g of glows) {
+        const u = g.userData;
+        const k = Math.min(1, ringT[u.cave] / 1.5);
+        const mat = g.material as THREE.SpriteMaterial;
+        // while ringing, every crystal in the cave swells and runs through the rainbow
+        if (k > 0) mat.color.copy(hue.setHSL((t * 0.6 + u.phase * 0.2) % 1, 0.9, 0.62));
+        else mat.color.set(u.base);
+        g.scale.setScalar(u.size * (1 + k * 0.7) + Math.sin(t * (1.7 + k * 6) + u.phase) * (0.9 + k * 1.5));
+      }
     },
   };
 }
